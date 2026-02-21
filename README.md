@@ -4,7 +4,7 @@ Network automation plugin for Claude Code. Powered by [Netmiko](https://github.c
 
 ## Features
 
-- **16 slash commands** — from `show` commands to full config deployment
+- **15 slash commands** — from `show` commands to full config deployment
 - **AI risk assessment** — every config change is analyzed for impact before execution
 - **Self-lockout prevention** — blocks changes that would cut your SSH access
 - **Multi-agent teams** — 3 specialized agents (compliance / operator / validator) coordinate autonomously
@@ -347,14 +347,14 @@ clanet-plugin/
 │   ├── agents/                   # 3 specialized agents
 │   └── skills/team/SKILL.md      # Multi-agent orchestration skill
 ├── lib/clanet_cli.py             # Common CLI engine (single source of truth)
-├── tests/test_cli.py             # 74 unit tests (no network required)
+├── tests/test_cli.py             # 75 unit tests (no network required)
 ├── policies/example.yaml         # Compliance rules (customizable)
 ├── context.example.yaml          # Operation context template
 ├── inventory.example.yaml        # Inventory template
 └── .clanet.example.yaml          # Config template
 ```
 
-All 16 commands and 3 agents share `lib/clanet_cli.py` — no duplicated connection or parsing logic.
+All 15 commands and 3 agents share `lib/clanet_cli.py` — no duplicated connection or parsing logic.
 
 ## Security Considerations
 
