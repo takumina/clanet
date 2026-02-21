@@ -1,12 +1,12 @@
 ---
-description: AI-powered network analysis - troubleshoot issues or explain configurations
+description: Network troubleshooting - Claude diagnoses issues or explains configurations from device output
 argument-hint: <device-name> <question-or-problem>
 allowed-tools: [Read, Bash, Glob, Grep]
 ---
 
-# /clanet:why - AI Network Analysis
+# /clanet:why - Network Troubleshooting & Explanation
 
-Intelligently diagnose network issues OR explain existing configurations.
+Diagnose network issues or explain existing configurations using device output.
 
 ## Instructions
 

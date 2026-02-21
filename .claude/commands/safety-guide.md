@@ -38,7 +38,7 @@ Before any config change, present a clear change summary:
 +----------------------------------------------------------+
 ```
 
-## Phase 2: EXPLAIN - AI analysis of impact
+## Phase 2: EXPLAIN - Impact analysis
 
 Claude MUST analyze and explain:
 
