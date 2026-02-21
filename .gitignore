@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# clanet runtime artifacts
+logs/
+backups/
+snapshots/
+audit/
+
+# Inventory (contains credentials)
+inventory.yaml
+
+# User config overrides
+.clanet.yaml
+
+# IDE
+.vscode/
+.idea/
+
+# pytest
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db

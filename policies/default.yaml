@@ -1,0 +1,85 @@
+# clanet Compliance Policy - Default
+# This file defines the rules that all network configuration changes must follow.
+# The Compliance Checker agent validates proposed changes against these rules.
+
+policy:
+  name: default
+  version: "1.0"
+  description: "Standard network compliance policy"
+
+rules:
+  # === Security ===
+  security:
+    - id: SEC-001
+      name: No plaintext passwords
+      severity: CRITICAL
+      description: "All passwords must be encrypted (type 5/7/8/9). No 'password <plaintext>' allowed."
+      pattern_deny: 'password \S+$'  # bare password without encryption type
+      pattern_allow: 'password \d+ \S+'  # encrypted password
+
+    - id: SEC-002
+      name: SSH v2 required
+      severity: HIGH
+      description: "SSH version 2 must be enabled. SSH v1 is not allowed."
+      require: 'ssh server v2'
+
+    - id: SEC-003
+      name: No SNMP default communities
+      severity: HIGH
+      description: "SNMP community strings 'public' and 'private' are prohibited."
+      pattern_deny: 'snmp-server community (public|private)'
+
+    - id: SEC-004
+      name: VTY ACL required
+      severity: MEDIUM
+      description: "VTY lines must have an access-class applied."
+      require_on: 'line vty'
+      require: 'access-class'
+
+  # === Operational Safety ===
+  safety:
+    - id: SAF-001
+      name: Management interface protection
+      severity: CRITICAL
+      description: "MgmtEth / Management interface IP and shutdown state must not be modified."
+      pattern_deny: '(no )?interface Mgmt|shutdown.*Mgmt'
+      scope: config_commands
+
+    - id: SAF-002
+      name: No bulk protocol removal
+      severity: CRITICAL
+      description: "Removing an entire routing protocol (no router ospf/bgp) is prohibited without explicit override."
+      pattern_deny: 'no router (ospf|bgp|isis)'
+
+    - id: SAF-003
+      name: Interface description required
+      severity: LOW
+      description: "All interfaces being configured should have a description."
+      recommend: 'description'
+      scope: interface_config
+
+  # === Standards ===
+  standards:
+    - id: STD-001
+      name: NTP required
+      severity: MEDIUM
+      description: "All devices must have at least one NTP server configured."
+      require_in_running: 'ntp server'
+
+    - id: STD-002
+      name: Logging server required
+      severity: MEDIUM
+      description: "All devices must have a syslog destination configured."
+      require_in_running: 'logging.*\d+\.\d+\.\d+\.\d+'
+
+    - id: STD-003
+      name: Banner required
+      severity: LOW
+      description: "All devices must have a login banner."
+      require_in_running: 'banner'
+
+severity_levels:
+  CRITICAL: "Must fix. Blocks deployment."
+  HIGH: "Should fix. Requires explicit override to proceed."
+  MEDIUM: "Recommended. Warning only."
+  LOW: "Best practice. Informational."

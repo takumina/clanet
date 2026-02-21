@@ -1,0 +1,17 @@
+# .clanet.yaml - clanet plugin configuration
+# Place this file in your project root or home directory (~/.clanet.yaml).
+# Project-level config takes priority over home-level config.
+#
+# Search order: ./.clanet.yaml → ~/.clanet.yaml → built-in defaults
+
+# Custom inventory file path (default: ./inventory.yaml or ~/.net-inventory.yaml)
+# inventory: ./my-inventory.yaml
+
+# Custom compliance policy file (default: policies/default.yaml)
+# policy_file: ./policies/my-company-policy.yaml
+
+# Default audit profile: basic | security | full (default: basic)
+# default_profile: security
+
+# Auto-backup running-config before applying changes (default: false)
+# auto_backup: true
