@@ -2,6 +2,8 @@
 
 Network automation plugin for Claude Code. Powered by [Netmiko](https://github.com/ktbyers/netmiko).
 
+**English** | [日本語](docs/README_ja.md)
+
 ## Features
 
 - **16 slash commands** — from `show` commands to full config deployment

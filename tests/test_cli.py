@@ -754,3 +754,150 @@ class TestEnvVarExpansion:
     def test_no_expansion_for_plain_string(self):
         result = clanet_cli._expand_env_vars("plainpassword")
         assert result == "plainpassword"
+
+    def test_expand_multiple_vars(self, monkeypatch):
+        monkeypatch.setenv("USER1", "admin")
+        monkeypatch.setenv("PASS1", "secret")
+        result = clanet_cli._expand_env_vars("${USER1}:${PASS1}")
+        assert result == "admin:secret"
+
+    def test_expand_partial_undefined(self, monkeypatch):
+        monkeypatch.setenv("DEFINED_VAR", "ok")
+        monkeypatch.delenv("UNDEF_VAR", raising=False)
+        result = clanet_cli._expand_env_vars("${DEFINED_VAR}-${UNDEF_VAR}")
+        assert result == "ok-${UNDEF_VAR}"
+
+
+# ---------------------------------------------------------------------------
+# JSON Error Handling (cmd_config / cmd_interact)
+# ---------------------------------------------------------------------------
+
+
+class TestJsonErrorHandling:
+    """Tests that invalid JSON in --commands produces a clear error."""
+
+    def test_config_invalid_json(self, mock_inventory):
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["config", "router01", "--commands", "not-json"])
+        with pytest.raises(SystemExit):
+            clanet_cli.cmd_config(args)
+
+    def test_interact_invalid_json(self, mock_inventory):
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["interact", "router01", "--commands", "{bad}"])
+        with pytest.raises(SystemExit):
+            clanet_cli.cmd_interact(args)
+
+
+# ---------------------------------------------------------------------------
+# Subcommand Integration Tests (with mocked Netmiko)
+# ---------------------------------------------------------------------------
+
+
+class TestSubcommandIntegration:
+    """Integration tests that mock Netmiko to verify end-to-end subcommand flow."""
+
+    @pytest.fixture
+    def mock_conn(self):
+        """Create a mock Netmiko connection."""
+        conn = MagicMock()
+        conn.send_command.return_value = "mocked output"
+        conn.send_config_set.return_value = "config applied"
+        conn.commit.return_value = ""
+        conn.is_alive.return_value = True
+        conn.find_prompt.return_value = "router01#"
+        conn.save_config.return_value = "[OK]"
+        return conn
+
+    @pytest.fixture
+    def patched_env(self, mock_inventory, mock_conn, monkeypatch):
+        """Patch connect() and inventory for integration tests."""
+        monkeypatch.setattr(clanet_cli, "connect", lambda dev: mock_conn)
+        return mock_conn
+
+    def test_cmd_show(self, patched_env, capsys):
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["show", "router01", "show", "ip", "route"])
+        clanet_cli.cmd_show(args)
+        captured = capsys.readouterr()
+        assert "mocked output" in captured.out
+        patched_env.send_command.assert_called_once_with(
+            "show ip route", read_timeout=30
+        )
+
+    def test_cmd_info(self, patched_env, capsys):
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["info", "router01"])
+        clanet_cli.cmd_info(args)
+        captured = capsys.readouterr()
+        assert "mocked output" in captured.out
+
+    def test_cmd_config_ios(self, patched_env, capsys, tmp_path, monkeypatch):
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args([
+            "config", "router01", "--commands", '["ntp server 10.0.0.1"]'
+        ])
+        clanet_cli.cmd_config(args)
+        captured = capsys.readouterr()
+        assert "[OK]" in captured.out
+        patched_env.send_config_set.assert_called_once()
+
+    def test_cmd_config_xr_commits(self, mock_inventory, mock_conn, monkeypatch,
+                                    capsys, tmp_path):
+        """IOS-XR devices should call commit() after config."""
+        monkeypatch.setattr(clanet_cli, "connect", lambda dev: mock_conn)
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args([
+            "config", "router02", "--commands", '["ntp server 10.0.0.1"]'
+        ])
+        clanet_cli.cmd_config(args)
+        mock_conn.commit.assert_called_once()
+        mock_conn.exit_config_mode.assert_called_once()
+
+    def test_cmd_backup(self, patched_env, capsys, tmp_path, monkeypatch):
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+            "backups": str(tmp_path / "backups"),
+        })
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["backup", "router01"])
+        clanet_cli.cmd_backup(args)
+        captured = capsys.readouterr()
+        assert "[OK]" in captured.out
+        # Verify backup file was created
+        backup_files = list((tmp_path / "backups").glob("router01_*.cfg"))
+        assert len(backup_files) == 1
+
+    def test_cmd_list(self, mock_inventory, capsys):
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["list"])
+        clanet_cli.cmd_list(args)
+        captured = capsys.readouterr()
+        assert "router01" in captured.out
+        assert "router02" in captured.out
+        assert "switch01" in captured.out
+
+    def test_cmd_device_info(self, mock_inventory, capsys):
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["device-info", "router01"])
+        clanet_cli.cmd_device_info(args)
+        captured = capsys.readouterr()
+        info = json.loads(captured.out)
+        assert info["device_type"] == "cisco_ios"
+        assert info["host"] == "192.168.1.1"
+        assert info["needs_commit"] is False
+
+    def test_cmd_context_no_file(self, monkeypatch, capsys):
+        monkeypatch.setattr(clanet_cli, "CONTEXT_PATHS", ["/nonexistent"])
+        monkeypatch.setattr(clanet_cli, "_config", {"context_file": None})
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["context"])
+        clanet_cli.cmd_context(args)
+        captured = capsys.readouterr()
+        assert "No context file found" in captured.out
