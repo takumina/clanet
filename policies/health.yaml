@@ -1,46 +1,51 @@
-# policies/health.yaml - Health Check & Snapshot Command Definitions
+# clanet Health Check & Snapshot Commands
 #
-# Defines which show commands to run for health checks and state snapshots.
+# Defines which show commands to run for /clanet:check and /clanet:snapshot.
 # Customize freely: add MPLS checks, remove OSPF, etc.
 #
 # To use a custom file:
 #   cp policies/health.yaml policies/my-health.yaml
 #   # Edit policies/my-health.yaml
-#   # Set health_file in .clanet.yaml:
-#   #   health_file: ./policies/my-health.yaml
+#   # Set in .clanet.yaml: health_file: ./policies/my-health.yaml
 
 # --- Health Check Commands ---
 # Used by: /clanet:check
+# These are quick operational commands to assess device health.
 health_commands:
   cisco_ios:
     - show ip interface brief
     - show ip bgp summary
     - show ip ospf neighbor
     - show ip route summary
+    - show logging last 20
 
   cisco_xr:
     - show ip interface brief
     - show bgp summary
     - show ospf neighbor
     - show route summary
+    - show logging last 20
 
   cisco_nxos:
     - show ip interface brief
     - show ip bgp summary
     - show ip ospf neighbors
     - show ip route summary
+    - show logging last 20
 
   juniper_junos:
     - show interfaces terse
     - show bgp summary
     - show ospf neighbor
     - show route summary
+    - show log messages | last 20
 
   arista_eos:
     - show ip interface brief
     - show ip bgp summary
     - show ip ospf neighbor
     - show ip route summary
+    - show logging last 20
 
 # --- Snapshot Commands ---
 # Used by: /clanet:validate (pre/post change snapshots)
@@ -86,6 +91,9 @@ snapshot_commands:
 fallback:
   health_commands:
     - show ip interface brief
+    - show ip bgp summary
+    - show ip route summary
   snapshot_commands:
-    - show ip interface brief
     - show running-config
+    - show ip interface brief
+    - show ip route
