@@ -328,7 +328,9 @@ def log_operation(device: str, action: str, detail: str = "", status: str = "SUC
     entry = f"[{ts}] DEVICE={device} ACTION={action} STATUS={status}"
     if detail:
         entry += f" DETAIL={_redact_sensitive(detail)}"
-    with open(log_dir / "clanet_operations.log", "a") as f:
+    log_file = log_dir / "clanet_operations.log"
+    fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, "a") as f:
         f.write(entry + "\n")
 
 
@@ -340,9 +342,9 @@ def save_artifact(dir_type: str, device: str, content: str, suffix: str = "",
     suffix_str = f"_{suffix}" if suffix else ""
     filename = f"{device}{suffix_str}_{ts}{ext}"
     filepath = out_dir / filename
-    with open(filepath, "w") as f:
+    fd = os.open(filepath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         f.write(content)
-    os.chmod(filepath, 0o600)
     return str(filepath)
 
 
@@ -701,19 +703,15 @@ def cmd_snapshot(args):
             print(f"--- {cmd} ---")
             try:
                 output = conn.send_command(cmd, read_timeout=config["read_timeout_long"])
-                snapshot[cmd] = output
-                print(output)
+                redacted = _redact_sensitive(output)
+                snapshot[cmd] = redacted
+                print(redacted)
             except Exception as e:
                 snapshot[cmd] = f"error: {e}"
                 print(f"[WARN] {e}")
             print()
     finally:
         conn.disconnect()
-
-    # Redact sensitive values before saving snapshot to disk
-    for cmd in snapshot:
-        if isinstance(snapshot[cmd], str):
-            snapshot[cmd] = _redact_sensitive(snapshot[cmd])
 
     filepath = save_artifact("snapshots", args.device, json.dumps(snapshot, indent=2),
                              suffix=phase, ext=".json")
