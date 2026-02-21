@@ -40,8 +40,8 @@ python3 lib/clanet_cli.py info "$ARGUMENT"
 - `/clanet:save` - Save running config to startup
 - `/clanet:commit` - Commit changes (IOS-XR, Junos)
 
-### AI-Powered Analysis
-- `/clanet:why` - AI troubleshooting (diagnose issues with intelligent analysis)
+### Analysis & Compliance
+- `/clanet:why` - Troubleshooting (Claude diagnoses issues from device output)
 - `/clanet:validate` - Change validation (pre/post snapshot, diff, auto-rollback)
 - `/clanet:audit` - Compliance audit (security & best practices check)
 

@@ -7,7 +7,7 @@
 ## 特徴
 
 - **16 のスラッシュコマンド** — show コマンドからコンフィグ投入まで
-- **AI リスク評価** — 設定変更前に影響度を自動分析
+- **リスク評価** — 設定変更前に Claude が影響度を分析
 - **自己ロックアウト防止** — SSH アクセスを遮断する変更を自動検知・ブロック
 - **マルチエージェント** — 3 つの専門エージェント（コンプライアンス / オペレータ / バリデータ）が自律連携
 - **コンプライアンス監査** — カスタマイズ可能なポリシールールと重大度レベル
@@ -65,11 +65,11 @@ cp inventory.example.yaml inventory.yaml
 | `/clanet:save [device\|--all]` | running-config を startup に保存 |
 | `/clanet:commit [device\|--all]` | 変更をコミット（IOS-XR, Junos） |
 
-### AI 分析
+### 分析・コンプライアンス
 
 | コマンド | 説明 |
 |---------|------|
-| `/clanet:why <device> <problem>` | AI トラブルシューティング — 問題を診断 |
+| `/clanet:why <device> <problem>` | トラブルシューティング — Claude がデバイス出力から問題を診断 |
 | `/clanet:validate <device>` | Pre/Post 検証と自動ロールバック |
 | `/clanet:audit [device\|--all]` | コンプライアンス監査（セキュリティ・ベストプラクティス） |
 
@@ -176,20 +176,20 @@ success_criteria:
 
 ```
 1. 表示    適用されるコマンドを明示
-2. 説明    AI が影響度とリスク（LOW/MEDIUM/HIGH/CRITICAL）を分析
+2. 説明    Claude が影響度とリスク（LOW/MEDIUM/HIGH/CRITICAL）を分析
 3. 確認    人間が承認してから実行
 4. 検証    変更後の自動ヘルスチェック
 ```
 
 組み込みの安全機能:
 - **自己ロックアウト防止** — 管理インターフェースや VTY ACL を遮断する変更をブロック
-- **リスク評価** — AI が変更ごとにリスクレベルを判定
+- **リスク評価** — Claude が変更ごとにリスクレベルを判定
 - **操作ログ** — すべての変更を `logs/clanet_operations.log` に記録
 - **変更後検証** — コンフィグ適用後に自動ヘルスチェック
 
 ## マルチエージェントモード
 
-clanet は複雑な操作のための AI エージェントチームを搭載しています。`/clanet:team` で起動:
+複雑な操作では、`/clanet:team` が役割分離された 3 つの Claude Code エージェントを連携させます:
 
 ```bash
 /clanet:team router01 GigabitEthernet0/0/0/0 に description "Uplink to core-sw01" を設定
@@ -374,13 +374,25 @@ clanet/
 
 全 16 コマンドと 3 エージェントが `lib/clanet_cli.py` を共有 — 接続・パースロジックの重複はゼロです。
 
+### clanet の実装と Claude の役割
+
+| レイヤー | 実装 | 例 |
+|---------|------|-----|
+| **SSH・デバイス自動化** | Python (Netmiko) `lib/clanet_cli.py` | 接続、コマンド実行、バックアップ、スナップショット、ログ |
+| **ポリシーエンジン** | Python 正規表現 `_evaluate_rule()` | `pattern_deny`, `require`, `recommend` — 決定論的ルール評価 |
+| **安全ワークフロー** | プロンプト定義 `.claude/commands/` | 「表示→説明→確認→検証」— 構造化されたプロンプトシーケンス |
+| **リスク評価・診断** | Claude の LLM 推論（プロンプトで誘導） | `/clanet:why` のトラブルシューティング、変更リスク判定 |
+| **エージェント連携** | Claude Code エージェントフレームワーク `.claude/agents/` | ツール制限付きの役割分離エージェント |
+
+clanet は Claude Code プラグインです。プロンプト設計とツール連携により、Claude の推論能力をネットワーク運用に活用します。「知性」は Claude 自身が提供し、clanet はドメイン知識・安全ガードレール・デバイス自動化レイヤーを提供します。
+
 ## セキュリティに関する注意事項
 
 - **認証情報**: `inventory.yaml` にはデバイスの認証情報が含まれるため、デフォルトで gitignore 対象です。絶対にコミットしないでください。
 - **環境変数**: `inventory.yaml` 内で `${VAR_NAME}` 構文を使用してパスワードやユーザー名を指定できます（例: `password: ${NET_PASSWORD}`）。平文での保存を回避できます。
 - **SSH のみ**: すべてのデバイス通信は Netmiko 経由の SSH です。Telnet や HTTP は使用しません。
 - **外部通信なし**: clanet は外部サービスへのデータ送信を一切行いません。すべての操作はローカルの SSH セッションです。
-- **Human-in-the-loop**: コンフィグ変更には必ず人間の明示的な承認が必要です。AI はリスクを評価しますが、HIGH/CRITICAL の変更を自動適用することはありません。
+- **Human-in-the-loop**: コンフィグ変更には必ず人間の明示的な承認が必要です。Claude はリスクを評価しますが、HIGH/CRITICAL の変更を自動適用することはありません。
 - **監査証跡**: すべてのコンフィグ操作がタイムスタンプ・デバイス名・アクション・ステータスとともに `logs/clanet_operations.log` に記録されます。
 
 ## トラブルシューティング
