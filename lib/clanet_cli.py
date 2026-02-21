@@ -332,7 +332,12 @@ def cmd_config(args):
     """Apply configuration commands."""
     inv = load_inventory()
     dev = get_device(inv, args.device)
-    commands = json.loads(args.commands)
+    try:
+        commands = json.loads(args.commands)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: --commands is not valid JSON: {e}", file=sys.stderr)
+        print('  Expected format: --commands \'["cmd1", "cmd2"]\'', file=sys.stderr)
+        sys.exit(1)
 
     conn = connect(dev)
     try:
@@ -392,7 +397,12 @@ def cmd_interact(args):
     """Execute interactive commands with expect patterns."""
     inv = load_inventory()
     dev = get_device(inv, args.device)
-    commands = json.loads(args.commands)
+    try:
+        commands = json.loads(args.commands)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: --commands is not valid JSON: {e}", file=sys.stderr)
+        print('  Expected format: --commands \'["cmd1", "cmd2"]\'', file=sys.stderr)
+        sys.exit(1)
 
     conn = connect(dev)
     try:

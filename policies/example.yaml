@@ -1,6 +1,7 @@
 # clanet Compliance Policy - Example
 #
-# This is a sample policy file. Copy and customize it for your environment:
+# This policy file contains recommended default rules.
+# Copy and customize for your environment:
 #
 #   cp policies/example.yaml policies/my-policy.yaml
 #   # Edit policies/my-policy.yaml
@@ -18,104 +19,104 @@
 #   scope          - When to evaluate: config_commands | interface_config
 
 policy:
-  name: my-policy
+  name: clanet-default
   version: "1.0"
-  description: "Describe your policy here"
+  description: "Default compliance policy with industry best-practice rules"
 
 rules:
   # === Security ===
   # Rules to prevent insecure configurations
-  security: []
-    # - id: SEC-001
-    #   name: No plaintext passwords
-    #   severity: CRITICAL
-    #   description: "Passwords must use encryption (type 5/7/8/9)."
-    #   pattern_deny: 'password \S+$'
-    #   pattern_allow: 'password \d+ \S+'
-    #
-    # - id: SEC-002
-    #   name: SSH v2 required
-    #   severity: HIGH
-    #   description: "SSH version 2 must be enabled."
-    #   require_in_running: 'ssh.*v(ersion)?\s*2'
-    #
-    # - id: SEC-003
-    #   name: No default SNMP communities
-    #   severity: HIGH
-    #   description: "SNMP community strings 'public' and 'private' are not allowed."
-    #   pattern_deny: 'snmp-server community (public|private)'
-    #
-    # - id: SEC-004
-    #   name: VTY access control
-    #   severity: MEDIUM
-    #   description: "VTY lines should have an access-class or ACL applied."
-    #   require_on: 'line vty'
-    #   require: 'access-class'
-    #
-    # - id: SEC-005
-    #   name: Console timeout
-    #   severity: MEDIUM
-    #   description: "Console line should have an exec-timeout configured."
-    #   require_on: 'line con'
-    #   require: 'exec-timeout'
+  security:
+    - id: SEC-001
+      name: No plaintext passwords
+      severity: CRITICAL
+      description: "Passwords must use encryption (type 5/7/8/9)."
+      pattern_deny: 'password \S+$'
+      pattern_allow: 'password \d+ \S+'
+
+    - id: SEC-002
+      name: SSH v2 required
+      severity: HIGH
+      description: "SSH version 2 must be enabled."
+      require_in_running: 'ssh.*v(ersion)?\s*2'
+
+    - id: SEC-003
+      name: No default SNMP communities
+      severity: HIGH
+      description: "SNMP community strings 'public' and 'private' are not allowed."
+      pattern_deny: 'snmp-server community (public|private)'
+
+    - id: SEC-004
+      name: VTY access control
+      severity: MEDIUM
+      description: "VTY lines should have an access-class or ACL applied."
+      require_on: 'line vty'
+      require: 'access-class'
+
+    - id: SEC-005
+      name: Console timeout
+      severity: MEDIUM
+      description: "Console line should have an exec-timeout configured."
+      require_on: 'line con'
+      require: 'exec-timeout'
 
   # === Operational Safety ===
   # Rules to prevent accidental outages
-  safety: []
-    # - id: SAF-001
-    #   name: Management interface protection
-    #   severity: CRITICAL
-    #   description: "Management interface must not be modified or shut down."
-    #   pattern_deny: '(no )?interface Mgmt|shutdown.*Mgmt'
-    #   scope: config_commands
-    #
-    # - id: SAF-002
-    #   name: No bulk protocol removal
-    #   severity: CRITICAL
-    #   description: "Removing an entire routing protocol is prohibited."
-    #   pattern_deny: 'no router (ospf|bgp|isis|eigrp)'
-    #
-    # - id: SAF-003
-    #   name: No global shutdown
-    #   severity: CRITICAL
-    #   description: "Shutting down trunk or uplink interfaces is prohibited."
-    #   pattern_deny: 'shutdown'
-    #   pattern_allow: 'no shutdown'
-    #   scope: config_commands
-    #
-    # - id: SAF-004
-    #   name: Interface description recommended
-    #   severity: LOW
-    #   description: "Interfaces being configured should have a description."
-    #   recommend: 'description'
-    #   scope: interface_config
+  safety:
+    - id: SAF-001
+      name: Management interface protection
+      severity: CRITICAL
+      description: "Management interface must not be modified or shut down."
+      pattern_deny: '(no )?interface Mgmt|shutdown.*Mgmt'
+      scope: config_commands
+
+    - id: SAF-002
+      name: No bulk protocol removal
+      severity: CRITICAL
+      description: "Removing an entire routing protocol is prohibited."
+      pattern_deny: 'no router (ospf|bgp|isis|eigrp)'
+
+    - id: SAF-003
+      name: No global shutdown
+      severity: CRITICAL
+      description: "Shutting down trunk or uplink interfaces is prohibited."
+      pattern_deny: 'shutdown'
+      pattern_allow: 'no shutdown'
+      scope: config_commands
+
+    - id: SAF-004
+      name: Interface description recommended
+      severity: LOW
+      description: "Interfaces being configured should have a description."
+      recommend: 'description'
+      scope: interface_config
 
   # === Standards ===
   # Baseline configuration requirements
-  standards: []
-    # - id: STD-001
-    #   name: NTP configured
-    #   severity: MEDIUM
-    #   description: "At least one NTP server must be configured."
-    #   require_in_running: 'ntp server'
-    #
-    # - id: STD-002
-    #   name: Logging configured
-    #   severity: MEDIUM
-    #   description: "A syslog destination must be configured."
-    #   require_in_running: 'logging.*\d+\.\d+\.\d+\.\d+'
-    #
-    # - id: STD-003
-    #   name: Login banner
-    #   severity: LOW
-    #   description: "A login banner should be configured."
-    #   require_in_running: 'banner'
-    #
-    # - id: STD-004
-    #   name: DNS configured
-    #   severity: LOW
-    #   description: "A DNS server should be configured."
-    #   require_in_running: '(ip )?name.server|domain name-server'
+  standards:
+    - id: STD-001
+      name: NTP configured
+      severity: MEDIUM
+      description: "At least one NTP server must be configured."
+      require_in_running: 'ntp server'
+
+    - id: STD-002
+      name: Logging configured
+      severity: MEDIUM
+      description: "A syslog destination must be configured."
+      require_in_running: 'logging.*\d+\.\d+\.\d+\.\d+'
+
+    - id: STD-003
+      name: Login banner
+      severity: LOW
+      description: "A login banner should be configured."
+      require_in_running: 'banner'
+
+    - id: STD-004
+      name: DNS configured
+      severity: LOW
+      description: "A DNS server should be configured."
+      require_in_running: '(ip )?name.server|domain name-server'
 
 severity_levels:
   CRITICAL: "Must fix. Blocks deployment."
