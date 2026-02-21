@@ -98,6 +98,11 @@ DIRS = {
 TS_LOG = "%Y-%m-%d %H:%M:%S"
 TS_FILE = "%Y%m%d_%H%M%S"
 
+# Patterns matching sensitive values to redact in logs and artifacts
+_SENSITIVE_RE = re.compile(
+    r'(?i)((?:password|secret|community|key-string)\s+(?:\d+\s+)?)\S+'
+)
+
 # ---------------------------------------------------------------------------
 # Core: Inventory & Connection
 # ---------------------------------------------------------------------------
@@ -193,6 +198,27 @@ def _expand_env_vars(value: str) -> str:
     return re.sub(r"\$\{([^}]+)\}", _replace, value)
 
 
+def _redact_sensitive(text: str) -> str:
+    """Redact sensitive values (passwords, secrets, community strings) in text.
+
+    Replaces the value portion of password/secret/community/key-string
+    patterns with '***'.
+    """
+    return _SENSITIVE_RE.sub(r'\1***', text)
+
+
+def _warn_plaintext_passwords(inv: dict) -> None:
+    """Warn to stderr when devices use plaintext passwords instead of env vars."""
+    for name, dev in inv.get("devices", {}).items():
+        pw = dev.get("password", "")
+        if isinstance(pw, str) and pw and not re.search(r'\$\{.+\}', pw):
+            print(
+                f"[SECURITY] {name}: password is plaintext in inventory. "
+                f"Use ${{ENV_VAR}} syntax instead.",
+                file=sys.stderr,
+            )
+
+
 def load_inventory() -> dict:
     """Load device inventory from standard paths.
 
@@ -209,6 +235,7 @@ def load_inventory() -> dict:
             with open(path) as f:
                 inv = yaml.safe_load(f)
             if inv and "devices" in inv:
+                _warn_plaintext_passwords(inv)
                 for dev in inv["devices"].values():
                     for field in ("password", "username"):
                         if field in dev and isinstance(dev[field], str):
@@ -300,7 +327,7 @@ def log_operation(device: str, action: str, detail: str = "", status: str = "SUC
     ts = datetime.now().strftime(TS_LOG)
     entry = f"[{ts}] DEVICE={device} ACTION={action} STATUS={status}"
     if detail:
-        entry += f" DETAIL={detail}"
+        entry += f" DETAIL={_redact_sensitive(detail)}"
     with open(log_dir / "clanet_operations.log", "a") as f:
         f.write(entry + "\n")
 
@@ -315,6 +342,7 @@ def save_artifact(dir_type: str, device: str, content: str, suffix: str = "",
     filepath = out_dir / filename
     with open(filepath, "w") as f:
         f.write(content)
+    os.chmod(filepath, 0o600)
     return str(filepath)
 
 
@@ -681,6 +709,11 @@ def cmd_snapshot(args):
             print()
     finally:
         conn.disconnect()
+
+    # Redact sensitive values before saving snapshot to disk
+    for cmd in snapshot:
+        if isinstance(snapshot[cmd], str):
+            snapshot[cmd] = _redact_sensitive(snapshot[cmd])
 
     filepath = save_artifact("snapshots", args.device, json.dumps(snapshot, indent=2),
                              suffix=phase, ext=".json")
