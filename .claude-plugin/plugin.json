@@ -30,5 +30,5 @@
     "python": ">=3.10",
     "pip": ["netmiko", "pyyaml"]
   },
-  "installation_instructions": "pip install netmiko pyyaml && cp inventory.example.yaml inventory.yaml"
+  "installation_instructions": "pip install -r requirements.txt && cp examples/inventory.yaml inventory.yaml"
 }

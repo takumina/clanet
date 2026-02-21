@@ -1,0 +1,91 @@
+# policies/health.yaml - Health Check & Snapshot Command Definitions
+#
+# Defines which show commands to run for health checks and state snapshots.
+# Customize freely: add MPLS checks, remove OSPF, etc.
+#
+# To use a custom file:
+#   cp policies/health.yaml policies/my-health.yaml
+#   # Edit policies/my-health.yaml
+#   # Set health_file in .clanet.yaml:
+#   #   health_file: ./policies/my-health.yaml
+
+# --- Health Check Commands ---
+# Used by: /clanet:check
+health_commands:
+  cisco_ios:
+    - show ip interface brief
+    - show ip bgp summary
+    - show ip ospf neighbor
+    - show ip route summary
+
+  cisco_xr:
+    - show ip interface brief
+    - show bgp summary
+    - show ospf neighbor
+    - show route summary
+
+  cisco_nxos:
+    - show ip interface brief
+    - show ip bgp summary
+    - show ip ospf neighbors
+    - show ip route summary
+
+  juniper_junos:
+    - show interfaces terse
+    - show bgp summary
+    - show ospf neighbor
+    - show route summary
+
+  arista_eos:
+    - show ip interface brief
+    - show ip bgp summary
+    - show ip ospf neighbor
+    - show ip route summary
+
+# --- Snapshot Commands ---
+# Used by: /clanet:validate (pre/post change snapshots)
+# Each vendor MUST include a running-config command for diff comparison.
+snapshot_commands:
+  cisco_ios:
+    - show running-config
+    - show ip interface brief
+    - show ip bgp summary
+    - show ip ospf neighbor
+    - show ip route
+
+  cisco_xr:
+    - show running-config
+    - show ip interface brief
+    - show bgp summary
+    - show ospf neighbor
+    - show route
+
+  cisco_nxos:
+    - show running-config
+    - show ip interface brief
+    - show ip bgp summary
+    - show ip ospf neighbors
+    - show ip route
+
+  juniper_junos:
+    - show configuration
+    - show interfaces terse
+    - show bgp summary
+    - show ospf neighbor
+    - show route
+
+  arista_eos:
+    - show running-config
+    - show ip interface brief
+    - show ip bgp summary
+    - show ip ospf neighbor
+    - show ip route
+
+# --- Fallback Commands ---
+# Used when device_type is not listed above.
+fallback:
+  health_commands:
+    - show ip interface brief
+  snapshot_commands:
+    - show ip interface brief
+    - show running-config
