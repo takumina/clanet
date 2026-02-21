@@ -4,7 +4,7 @@ This file provides guidance for AI assistants working on the clanet codebase.
 
 ## Project Overview
 
-clanet is a **Claude Code plugin** for network automation, powered by [Netmiko](https://github.com/ktbyers/netmiko). It provides 16 slash commands, 3 specialized AI agents, and a multi-agent team orchestration skill for safely managing network devices (Cisco IOS/XR/NX-OS, Juniper, Arista, etc.) via SSH.
+clanet is a **Claude Code plugin** for network automation, powered by [Netmiko](https://github.com/ktbyers/netmiko). It provides 16 slash commands, 3 specialized Claude Code agents, and a multi-agent team orchestration skill for safely managing network devices (Cisco IOS/XR/NX-OS, Juniper, Arista, etc.) via SSH.
 
 - **Version**: 0.2.0
 - **License**: MIT
@@ -29,7 +29,7 @@ clanet/
 │   │   ├── save.md         # /clanet:save — write memory
 │   │   ├── commit.md       # /clanet:commit — commit (IOS-XR/Junos)
 │   │   ├── validate.md     # /clanet:validate — pre/post snapshot diff
-│   │   ├── why.md          # /clanet:why — AI troubleshooting
+│   │   ├── why.md          # /clanet:why — network troubleshooting
 │   │   ├── audit.md        # /clanet:audit — compliance audit
 │   │   ├── team.md         # /clanet:team — multi-agent team change
 │   │   └── safety-guide.md # [internal] shared safety framework
