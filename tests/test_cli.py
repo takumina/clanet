@@ -11,16 +11,15 @@ Tests cover:
 """
 
 import json
-import os
 import sys
-import tempfile
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
+
+import pytest
 
 # Add lib/ to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
-import clanet_cli
+import clanet_cli  # noqa: E402, I001
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +81,7 @@ class TestInventory:
 
     def test_load_inventory_not_found(self, monkeypatch):
         monkeypatch.setattr(clanet_cli, "INVENTORY_PATHS", ["/nonexistent.yaml"])
-        with pytest.raises(SystemExit):
+        with pytest.raises(clanet_cli.InventoryNotFoundError):
             clanet_cli.load_inventory()
 
     def test_get_device_by_name(self, mock_inventory):
@@ -98,7 +97,7 @@ class TestInventory:
 
     def test_get_device_not_found(self, mock_inventory):
         inv = clanet_cli.load_inventory()
-        with pytest.raises(SystemExit):
+        with pytest.raises(clanet_cli.DeviceNotFoundError):
             clanet_cli.get_device(inv, "nonexistent")
 
 
@@ -187,9 +186,9 @@ class TestHealthConfig:
         assert "cisco_ios" in hc["health_commands"]
 
     def test_load_health_config_not_found(self, monkeypatch):
-        """_load_health_config() should exit when health file is not found."""
+        """_load_health_config() should raise ConfigError when health file is not found."""
         monkeypatch.setattr(clanet_cli, "_config", {"health_file": "/nonexistent/health.yaml"})
-        with pytest.raises(SystemExit):
+        with pytest.raises(clanet_cli.ConfigError):
             clanet_cli._load_health_config()
 
     def test_load_health_config_custom_path(self, tmp_path, monkeypatch):
@@ -317,7 +316,9 @@ class TestArtifacts:
         monkeypatch.setattr(clanet_cli, "DIRS", {
             "snapshots": str(tmp_path / "snapshots"),
         })
-        filepath = clanet_cli.save_artifact("snapshots", "router01", "{}", suffix="pre", ext=".json")
+        filepath = clanet_cli.save_artifact(
+            "snapshots", "router01", "{}", suffix="pre", ext=".json"
+        )
         assert "_pre_" in filepath
 
     def test_log_operation(self, tmp_path, monkeypatch):
@@ -388,6 +389,39 @@ class TestConstants:
         assert "audit" in clanet_cli.DIRS
 
 
+# ---------------------------------------------------------------------------
+# Exception Hierarchy
+# ---------------------------------------------------------------------------
+
+
+class TestExceptionHierarchy:
+    """Verify custom exceptions inherit from ClanetError."""
+
+    def test_inventory_not_found_is_clanet_error(self):
+        assert issubclass(clanet_cli.InventoryNotFoundError, clanet_cli.ClanetError)
+
+    def test_device_not_found_is_clanet_error(self):
+        assert issubclass(clanet_cli.DeviceNotFoundError, clanet_cli.ClanetError)
+
+    def test_device_connection_error_is_clanet_error(self):
+        assert issubclass(clanet_cli.DeviceConnectionError, clanet_cli.ClanetError)
+
+    def test_config_error_is_clanet_error(self):
+        assert issubclass(clanet_cli.ConfigError, clanet_cli.ClanetError)
+
+    def test_clanet_error_is_exception(self):
+        assert issubclass(clanet_cli.ClanetError, Exception)
+
+    def test_main_catches_clanet_error(self, monkeypatch):
+        """main() should convert ClanetError to sys.exit(1)."""
+        monkeypatch.setattr(clanet_cli, "INVENTORY_PATHS", ["/nonexistent.yaml"])
+        monkeypatch.setattr(clanet_cli, "_config", None)
+        with pytest.raises(SystemExit) as exc_info:
+            monkeypatch.setattr("sys.argv", ["clanet_cli", "list"])
+            clanet_cli.main()
+        assert exc_info.value.code == 1
+
+
 
 # ---------------------------------------------------------------------------
 # Connect Error Handling
@@ -396,7 +430,7 @@ class TestConstants:
 
 class TestConnect:
     def test_connect_missing_netmiko(self, monkeypatch):
-        """connect() should exit with guidance when Netmiko is not installed."""
+        """connect() should raise DeviceConnectionError when Netmiko is not installed."""
         import builtins
         original_import = builtins.__import__
 
@@ -406,18 +440,18 @@ class TestConnect:
             return original_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", mock_import)
-        with pytest.raises(SystemExit):
+        with pytest.raises(clanet_cli.DeviceConnectionError):
             clanet_cli.connect({"device_type": "cisco_ios", "host": "1.1.1.1",
                                 "username": "admin", "password": "admin"})
 
     def test_connect_missing_fields(self):
-        """connect() should exit when required fields are missing."""
-        with pytest.raises(SystemExit):
+        """connect() should raise DeviceConnectionError when required fields are missing."""
+        with pytest.raises(clanet_cli.DeviceConnectionError):
             clanet_cli.connect({"host": "1.1.1.1"})
 
     def test_connect_missing_password(self):
-        """connect() should exit when password is missing."""
-        with pytest.raises(SystemExit):
+        """connect() should raise DeviceConnectionError when password is missing."""
+        with pytest.raises(clanet_cli.DeviceConnectionError):
             clanet_cli.connect({"device_type": "cisco_ios", "host": "1.1.1.1",
                                 "username": "admin"})
 
@@ -436,6 +470,14 @@ class TestConfigLoading:
         assert config["default_profile"] == "basic"
         assert config["auto_backup"] is False
 
+    def test_load_config_default_timeouts(self, monkeypatch):
+        """load_config() should include default timeout values."""
+        monkeypatch.setattr(clanet_cli, "CONFIG_PATHS", ["/nonexistent/.clanet.yaml"])
+        monkeypatch.setattr(clanet_cli, "_config", None)
+        config = clanet_cli.load_config()
+        assert config["read_timeout"] == 30
+        assert config["read_timeout_long"] == 60
+
     def test_load_config_custom(self, tmp_path, monkeypatch):
         """load_config() should load settings from .clanet.yaml."""
         config_file = tmp_path / ".clanet.yaml"
@@ -445,6 +487,16 @@ class TestConfigLoading:
         config = clanet_cli.load_config()
         assert config["default_profile"] == "security"
         assert config["auto_backup"] is True
+
+    def test_load_config_custom_timeouts(self, tmp_path, monkeypatch):
+        """load_config() should allow overriding timeout values."""
+        config_file = tmp_path / ".clanet.yaml"
+        config_file.write_text("read_timeout: 45\nread_timeout_long: 120\n")
+        monkeypatch.setattr(clanet_cli, "CONFIG_PATHS", [str(config_file)])
+        monkeypatch.setattr(clanet_cli, "_config", None)
+        config = clanet_cli.load_config()
+        assert config["read_timeout"] == 45
+        assert config["read_timeout_long"] == 120
 
 
 # ---------------------------------------------------------------------------
@@ -779,13 +831,13 @@ class TestJsonErrorHandling:
     def test_config_invalid_json(self, mock_inventory):
         parser = clanet_cli.build_parser()
         args = parser.parse_args(["config", "router01", "--commands", "not-json"])
-        with pytest.raises(SystemExit):
+        with pytest.raises(clanet_cli.ConfigError):
             clanet_cli.cmd_config(args)
 
     def test_interact_invalid_json(self, mock_inventory):
         parser = clanet_cli.build_parser()
         args = parser.parse_args(["interact", "router01", "--commands", "{bad}"])
-        with pytest.raises(SystemExit):
+        with pytest.raises(clanet_cli.ConfigError):
             clanet_cli.cmd_interact(args)
 
 
@@ -821,8 +873,9 @@ class TestSubcommandIntegration:
         clanet_cli.cmd_show(args)
         captured = capsys.readouterr()
         assert "mocked output" in captured.out
+        config = clanet_cli.get_config()
         patched_env.send_command.assert_called_once_with(
-            "show ip route", read_timeout=30
+            "show ip route", read_timeout=config["read_timeout"]
         )
 
     def test_cmd_info(self, patched_env, capsys):
@@ -901,3 +954,222 @@ class TestSubcommandIntegration:
         clanet_cli.cmd_context(args)
         captured = capsys.readouterr()
         assert "No context file found" in captured.out
+
+    def test_cmd_deploy_ios(self, patched_env, capsys, tmp_path, monkeypatch):
+        """Deploy config from file to IOS device."""
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        config_file = tmp_path / "deploy.cfg"
+        config_file.write_text("ntp server 10.0.0.1\n")
+        patched_env.send_config_from_file.return_value = "config applied from file"
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["deploy", "router01", str(config_file)])
+        clanet_cli.cmd_deploy(args)
+        captured = capsys.readouterr()
+        assert "[OK]" in captured.out
+        patched_env.send_config_from_file.assert_called_once()
+
+    def test_cmd_deploy_xr_commits(self, mock_inventory, mock_conn, monkeypatch,
+                                    capsys, tmp_path):
+        """Deploy to IOS-XR should call commit()."""
+        monkeypatch.setattr(clanet_cli, "connect", lambda dev: mock_conn)
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        config_file = tmp_path / "deploy.cfg"
+        config_file.write_text("router ospf 1\n")
+        mock_conn.send_config_from_file.return_value = "config applied"
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["deploy", "router02", str(config_file)])
+        clanet_cli.cmd_deploy(args)
+        mock_conn.commit.assert_called_once()
+        mock_conn.exit_config_mode.assert_called_once()
+
+    def test_cmd_deploy_file_not_found(self, mock_inventory, capsys):
+        """Deploy with nonexistent file should raise ConfigError."""
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["deploy", "router01", "/nonexistent/config.cfg"])
+        with pytest.raises(clanet_cli.ConfigError):
+            clanet_cli.cmd_deploy(args)
+
+    def test_cmd_save_ios(self, patched_env, capsys, tmp_path, monkeypatch):
+        """Save should call save_config() for IOS devices."""
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["save", "router01"])
+        clanet_cli.cmd_save(args)
+        captured = capsys.readouterr()
+        assert "[OK]" in captured.out
+        patched_env.save_config.assert_called_once()
+
+    def test_cmd_save_xr_skip(self, mock_inventory, mock_conn, monkeypatch, capsys):
+        """Save should skip commit-based platforms (XR)."""
+        monkeypatch.setattr(clanet_cli, "connect", lambda dev: mock_conn)
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["save", "router02"])
+        clanet_cli.cmd_save(args)
+        captured = capsys.readouterr()
+        assert "[SKIP]" in captured.out
+
+    def test_cmd_commit_xr(self, mock_inventory, mock_conn, monkeypatch,
+                            capsys, tmp_path):
+        """Commit should call commit() for XR devices."""
+        monkeypatch.setattr(clanet_cli, "connect", lambda dev: mock_conn)
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["commit", "router02"])
+        clanet_cli.cmd_commit(args)
+        captured = capsys.readouterr()
+        assert "[OK]" in captured.out
+        mock_conn.commit.assert_called_once()
+
+    def test_cmd_commit_ios_skip(self, patched_env, capsys):
+        """Commit should skip non-commit platforms (IOS)."""
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["commit", "router01"])
+        clanet_cli.cmd_commit(args)
+        captured = capsys.readouterr()
+        assert "[SKIP]" in captured.out
+
+    def test_cmd_mode_enable(self, patched_env, capsys):
+        """Mode enable should call conn.enable()."""
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["mode", "router01", "enable"])
+        clanet_cli.cmd_mode(args)
+        captured = capsys.readouterr()
+        assert "[OK]" in captured.out
+        patched_env.enable.assert_called_once()
+
+    def test_cmd_mode_config(self, patched_env, capsys):
+        """Mode config should call conn.config_mode()."""
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["mode", "router01", "config"])
+        clanet_cli.cmd_mode(args)
+        captured = capsys.readouterr()
+        assert "[OK]" in captured.out
+        patched_env.config_mode.assert_called_once()
+
+    def test_cmd_mode_exit_config(self, patched_env, capsys):
+        """Mode exit-config should call conn.exit_config_mode()."""
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["mode", "router01", "exit-config"])
+        clanet_cli.cmd_mode(args)
+        captured = capsys.readouterr()
+        assert "[OK]" in captured.out
+        patched_env.exit_config_mode.assert_called_once()
+
+    def test_cmd_mode_check(self, patched_env, capsys):
+        """Mode check should report enable/config mode status."""
+        patched_env.check_enable_mode.return_value = True
+        patched_env.check_config_mode.return_value = False
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["mode", "router01", "check"])
+        clanet_cli.cmd_mode(args)
+        captured = capsys.readouterr()
+        assert "Enable mode: True" in captured.out
+        assert "Config mode: False" in captured.out
+
+    def test_cmd_snapshot_pre(self, patched_env, capsys, tmp_path, monkeypatch):
+        """Snapshot pre should save snapshot JSON."""
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "snapshots": str(tmp_path / "snapshots"),
+        })
+        monkeypatch.setattr(clanet_cli, "_config", {
+            "health_file": None, "read_timeout": 30, "read_timeout_long": 60,
+        })
+        monkeypatch.chdir(Path(__file__).parent.parent)
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["snapshot", "router01", "--phase", "pre"])
+        clanet_cli.cmd_snapshot(args)
+        captured = capsys.readouterr()
+        assert "[OK]" in captured.out
+        snapshot_files = list((tmp_path / "snapshots").glob("router01_pre_*.json"))
+        assert len(snapshot_files) == 1
+        # Verify JSON content
+        content = json.loads(snapshot_files[0].read_text())
+        assert isinstance(content, dict)
+
+    def test_cmd_session_status(self, mock_inventory, monkeypatch, capsys):
+        """Session status should check TCP port."""
+        mock_socket = MagicMock()
+        mock_socket.connect_ex.return_value = 0
+
+        def mock_socket_cls(*args, **kwargs):
+            return mock_socket
+
+        monkeypatch.setattr(clanet_cli.socket, "socket", mock_socket_cls)
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["session", "router01"])
+        clanet_cli.cmd_session(args)
+        captured = capsys.readouterr()
+        assert "[OK]" in captured.out
+        assert "SSH port open" in captured.out
+
+    def test_cmd_session_port_closed(self, mock_inventory, monkeypatch, capsys):
+        """Session should report closed port."""
+        mock_socket = MagicMock()
+        mock_socket.connect_ex.return_value = 1
+
+        def mock_socket_cls(*args, **kwargs):
+            return mock_socket
+
+        monkeypatch.setattr(clanet_cli.socket, "socket", mock_socket_cls)
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["session", "router01"])
+        clanet_cli.cmd_session(args)
+        captured = capsys.readouterr()
+        assert "[FAIL]" in captured.out
+
+    def test_cmd_check_health(self, patched_env, capsys, monkeypatch):
+        """Health check should run vendor-specific commands."""
+        monkeypatch.setattr(clanet_cli, "_config", {
+            "health_file": None, "read_timeout": 30, "read_timeout_long": 60,
+        })
+        monkeypatch.chdir(Path(__file__).parent.parent)
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["check", "router01"])
+        clanet_cli.cmd_check(args)
+        captured = capsys.readouterr()
+        assert "Health Check: router01" in captured.out
+        assert "[OK]" in captured.out
+
+    def test_cmd_audit_with_policy(self, patched_env, capsys, tmp_path, monkeypatch):
+        """Audit should evaluate rules against running-config."""
+        import yaml
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+            "audit": str(tmp_path / "audit"),
+        })
+        monkeypatch.setattr(clanet_cli, "_config", {
+            "policy_file": None, "default_profile": "full",
+            "read_timeout": 30, "read_timeout_long": 60,
+        })
+        # Mock running config with NTP
+        patched_env.send_command.return_value = (
+            "hostname router01\nntp server 10.0.0.1\nlogging 10.0.0.2\n"
+        )
+        policy = {
+            "policy": {"name": "test-policy"},
+            "rules": {
+                "standards": [
+                    {"id": "STD-001", "name": "NTP configured", "severity": "MEDIUM",
+                     "require_in_running": "ntp server"},
+                ]
+            }
+        }
+        policy_file = tmp_path / "test-policy.yaml"
+        policy_file.write_text(yaml.dump(policy))
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["audit", "router01", "--policy", str(policy_file)])
+        clanet_cli.cmd_audit(args)
+        captured = capsys.readouterr()
+        assert "Score:" in captured.out
+        assert "[OK]" in captured.out
+        # Verify audit report saved
+        audit_files = list((tmp_path / "audit").glob("router01_*.md"))
+        assert len(audit_files) == 1
