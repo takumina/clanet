@@ -90,6 +90,19 @@ Compliance rules live entirely in YAML files (`policies/example.yaml`). The audi
 
 ## Development Guide
 
+### Exception Handling
+
+All recoverable errors use a custom exception hierarchy rooted at `ClanetError`:
+
+| Exception | Raised by |
+|-----------|-----------|
+| `InventoryNotFoundError` | `load_inventory()` |
+| `DeviceNotFoundError` | `get_device()` |
+| `DeviceConnectionError` | `connect()` |
+| `ConfigError` | `_load_health_config()`, `cmd_config()`, `cmd_deploy()`, `cmd_interact()`, `cmd_audit()` |
+
+`main()` catches `ClanetError` and converts to `sys.exit(1)`. Library consumers can catch specific exceptions without `SystemExit`.
+
 ### Dependencies
 
 ```bash
@@ -102,6 +115,15 @@ pip install -r requirements-dev.txt   # Dev (adds pytest)
 ```bash
 python3 -m pytest tests/test_cli.py -v
 ```
+
+### Linting
+
+```bash
+pip install ruff
+ruff check lib/ tests/
+```
+
+Configuration is in `pyproject.toml`. CI runs ruff automatically on push/PR.
 
 Tests are fully offline — no network devices needed. They use fixtures, monkeypatching, and `tmp_path` to test inventory loading, argument parsing, policy evaluation, artifact management, and more.
 
@@ -152,6 +174,7 @@ All tests should pass in a clean checkout. `policies/health.yaml` ships with the
 | Policy | `--policy` flag → `policy_file` in config → `policies/example.yaml` |
 | Health checks | `health_file` in config → `policies/health.yaml` |
 | Context | `context_file` in config → `./context.yaml` (optional) |
+| Timeouts | `read_timeout` / `read_timeout_long` in config → defaults (30s / 60s) |
 
 ### Commit Platforms
 
