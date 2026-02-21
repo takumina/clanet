@@ -27,6 +27,9 @@ context.yaml
 # pytest
 .pytest_cache/
 
+# Evaluation (local review only)
+EVALUATION.md
+
 # OS
 .DS_Store
 Thumbs.db
