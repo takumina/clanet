@@ -7,7 +7,7 @@ Network automation plugin for Claude Code. Powered by [Netmiko](https://github.c
 ## Features
 
 - **16 slash commands** — from `show` commands to full config deployment
-- **AI risk assessment** — every config change is analyzed for impact before execution
+- **Risk assessment** — Claude analyzes every config change for impact before execution
 - **Self-lockout prevention** — blocks changes that would cut your SSH access
 - **Multi-agent teams** — 3 specialized agents (compliance / operator / validator) coordinate autonomously
 - **Compliance auditing** — customizable policy rules with severity levels
@@ -65,11 +65,11 @@ cp examples/inventory.yaml inventory.yaml
 | `/clanet:save [device\|--all]` | Save running config to startup |
 | `/clanet:commit [device\|--all]` | Commit changes (IOS-XR, Junos) |
 
-### AI-Powered Analysis
+### Analysis & Compliance
 
 | Command | Description |
 |---------|-------------|
-| `/clanet:why <device> <problem>` | AI troubleshooting - diagnose issues intelligently |
+| `/clanet:why <device> <problem>` | Troubleshooting — Claude diagnoses issues from device output |
 | `/clanet:validate <device>` | Pre/post change validation with auto-rollback |
 | `/clanet:audit [device\|--all]` | Compliance audit (security & best practices) |
 
@@ -176,20 +176,20 @@ Every configuration change follows the **"Show, Explain, Confirm, Verify"** work
 
 ```
 1. SHOW      What commands will be applied
-2. EXPLAIN   AI analyzes impact and risk (LOW/MEDIUM/HIGH/CRITICAL)
+2. EXPLAIN   Claude analyzes impact and risk (LOW/MEDIUM/HIGH/CRITICAL)
 3. CONFIRM   Human approves before execution
 4. VERIFY    Automatic post-change verification
 ```
 
 Built-in safety features:
 - **Self-lockout prevention** - Blocks changes that would cut SSH access to the device
-- **Risk assessment** - AI evaluates each change before execution
+- **Risk assessment** - Claude evaluates each change before execution
 - **Operation logging** - Every change is recorded in `logs/clanet_operations.log`
 - **Post-change verification** - Automatic health check after config changes
 
 ## Multi-Agent Mode
 
-clanet includes AI agent teams for complex operations. Run `/clanet:team` to activate:
+For complex operations, `/clanet:team` coordinates three Claude Code agents with strict role separation:
 
 ```bash
 /clanet:team router01 Set description "Uplink to core-sw01" on GigabitEthernet0/0/0/0
@@ -362,13 +362,25 @@ clanet-plugin/
 
 All 16 commands and 3 agents share `lib/clanet_cli.py` — no duplicated connection or parsing logic.
 
+### What clanet builds vs. what Claude provides
+
+| Layer | Implementation | Examples |
+|-------|---------------|----------|
+| **SSH & device automation** | Python (Netmiko) in `lib/clanet_cli.py` | Connection, command execution, backup, snapshot, logging |
+| **Policy engine** | Python regex engine in `_evaluate_rule()` | `pattern_deny`, `require`, `recommend` — deterministic rule evaluation |
+| **Safety workflows** | Prompt definitions in `.claude/commands/` | "Show, Explain, Confirm, Verify" — structured prompt sequences |
+| **Risk assessment & diagnosis** | Claude's LLM reasoning, directed by prompts | `/clanet:why` troubleshooting, config change risk levels |
+| **Agent coordination** | Claude Code agent framework (`.claude/agents/`) | Role-separated agents with tool restrictions |
+
+clanet is a Claude Code plugin — it structures prompts and orchestrates tools to leverage Claude's reasoning for network operations. The "intelligence" comes from Claude itself; clanet provides the domain expertise, safety guardrails, and device automation layer.
+
 ## Security Considerations
 
 - **Credentials**: `inventory.yaml` contains device credentials and is gitignored by default. Never commit it.
 - **Environment variables**: Use `${VAR_NAME}` syntax in `inventory.yaml` for passwords and usernames (e.g., `password: ${NET_PASSWORD}`). This avoids storing credentials in plain text.
 - **SSH only**: All device communication uses SSH via Netmiko. No telnet, no HTTP.
 - **No external calls**: clanet does not phone home or send data to any external service. All operations are local SSH sessions.
-- **Human-in-the-loop**: Config changes always require explicit user confirmation. The AI assesses risk but never auto-applies HIGH/CRITICAL changes.
+- **Human-in-the-loop**: Config changes always require explicit user confirmation. Claude assesses risk but never auto-applies HIGH/CRITICAL changes.
 - **Audit trail**: Every config operation is logged to `logs/clanet_operations.log` with timestamp, device, action, and status.
 
 ## Troubleshooting
