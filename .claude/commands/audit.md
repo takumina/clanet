@@ -15,7 +15,7 @@ Audit network devices against security and operational best practices.
    - Optional profile: `--profile security`, `--profile basic`, `--profile full`
    - Optional custom policy: `--policy <path>`
    - Default profile is read from `.clanet.yaml` (`default_profile`), falling back to `basic`
-   - Custom policy path is read from `.clanet.yaml` (`policy_file`), falling back to `policies/default.yaml`
+   - Custom policy path is read from `.clanet.yaml` (`policy_file`), falling back to `policies/example.yaml`
 
 2. Execute the automated audit:
 

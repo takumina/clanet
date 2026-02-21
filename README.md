@@ -1,9 +1,6 @@
 # clanet - Network Automation for Claude Code
 
-**Safety-first** network automation plugin for Claude Code.
-Run commands, backup configs, deploy changes with AI-powered risk assessment, and audit compliance — all through slash commands.
-
-Powered by [Netmiko](https://github.com/ktbyers/netmiko). Tested on Cisco IOS-XR (Containerlab XRd).
+Network automation plugin for Claude Code. Powered by [Netmiko](https://github.com/ktbyers/netmiko).
 
 ## Features
 
@@ -201,32 +198,30 @@ Three specialized agents coordinate automatically:
 ```
          ┌──────────────┐
          │   Operator    │  Generate config → Execute
-         │   (Sonnet)    │
          └──────┬───────┘
                 ↓ COMPLIANCE CHECK REQUEST
          ┌──────────────┐
          │  Compliance   │  Policy violation check
-         │  (Haiku)      │  → PASS / WARN / BLOCK
+         │  Checker      │  → PASS / WARN / BLOCK
          └──────┬───────┘
                 ↓ CONFIG APPLIED
          ┌──────────────┐
          │  Validator    │  Post-change health check
-         │  (Sonnet)     │  → PASS / FAIL
+         │              │  → PASS / FAIL
          └──────────────┘
 ```
 
-| Agent | Model | Role | Hard Constraint |
-|-------|-------|------|-----------------|
-| **compliance-checker** | Haiku | Validates config against policy | NEVER executes commands. Judgment only. |
-| **network-operator** | Sonnet | Generates vendor-correct config and executes | NEVER deploys without compliance PASS. |
-| **validator** | Sonnet | Post-change health verification | NEVER makes config changes. Show commands only. |
+| Agent | Role | Hard Constraint |
+|-------|------|-----------------|
+| **compliance-checker** | Validates config against policy | NEVER executes commands. Judgment only. |
+| **network-operator** | Generates vendor-correct config and executes | NEVER deploys without compliance PASS. |
+| **validator** | Post-change health verification | NEVER makes config changes. Show commands only. |
 
 Design principles (inspired by [JANOG 57 NETCON Agent Teams](https://zenn.dev/takumina/articles/01d5d284aa5eef)):
 - **Safety through role separation** - Each agent has strict constraints on what it can/cannot do
-- **Cost optimization** - Compliance checker uses Haiku (lightweight model, judgment only)
 - **Autonomous workflow** - Agents communicate via SendMessage, no manual coordination needed
 
-Compliance policies are defined in `policies/default.yaml` and are fully customizable.
+Compliance policies are defined in `policies/example.yaml` and are fully customizable.
 
 ## Customization
 
@@ -244,7 +239,7 @@ auto_backup: true
 | Setting | Description | Default |
 |---------|-------------|---------|
 | `inventory` | Path to device inventory file | `./inventory.yaml` |
-| `policy_file` | Path to compliance policy YAML | `policies/default.yaml` |
+| `policy_file` | Path to compliance policy YAML | `policies/example.yaml` |
 | `default_profile` | Default audit profile (`basic`/`security`/`full`) | `basic` |
 | `auto_backup` | Auto-backup before config changes | `false` |
 | `health_file` | Path to health check / snapshot commands YAML | `policies/health.yaml` |
@@ -302,10 +297,10 @@ health_file: ./policies/my-health.yaml
 
 ### Custom Compliance Policy
 
-Copy `policies/default.yaml` and add your own rules:
+Copy `policies/example.yaml` and add your own rules:
 
 ```bash
-cp policies/default.yaml policies/my-policy.yaml
+cp policies/example.yaml policies/my-policy.yaml
 # Edit policies/my-policy.yaml with your rules
 ```
 
@@ -353,7 +348,7 @@ clanet-plugin/
 │   └── skills/team/SKILL.md      # Multi-agent orchestration skill
 ├── lib/clanet_cli.py             # Common CLI engine (single source of truth)
 ├── tests/test_cli.py             # 74 unit tests (no network required)
-├── policies/default.yaml         # Compliance rules (customizable)
+├── policies/example.yaml         # Compliance rules (customizable)
 ├── context.example.yaml          # Operation context template
 ├── inventory.example.yaml        # Inventory template
 └── .clanet.example.yaml          # Config template

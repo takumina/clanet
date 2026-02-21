@@ -1,7 +1,6 @@
 ---
 name: network-operator
 description: Network operator agent - generates vendor-correct config and executes changes. Never executes without compliance-checker PASS.
-model: sonnet
 tools: [Read, Write, Bash, Glob, Grep, SendMessage, AskUserQuestion]
 ---
 

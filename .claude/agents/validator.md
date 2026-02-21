@@ -1,7 +1,6 @@
 ---
 name: validator
 description: Post-change validation agent - verifies network health after config changes. Read-only, never makes config changes.
-model: sonnet
 tools: [Read, Bash, Glob, Grep, SendMessage]
 ---
 

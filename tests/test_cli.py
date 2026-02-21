@@ -339,28 +339,35 @@ class TestArtifacts:
 
 
 class TestDefaultPolicyFile:
-    """Tests that policies/default.yaml is valid and has expected structure."""
+    """Tests that policies/example.yaml is valid YAML with expected structure."""
 
     @pytest.fixture
     def default_policy(self):
         import yaml
-        policy_path = Path(__file__).parent.parent / "policies" / "default.yaml"
+        policy_path = Path(__file__).parent.parent / "policies" / "example.yaml"
         with open(policy_path) as f:
             return yaml.safe_load(f)
 
-    def test_policy_has_rules(self, default_policy):
-        rules = clanet_cli._parse_policy_rules(default_policy)
-        assert len(rules) >= 3
+    def test_policy_file_loads(self, default_policy):
+        """example.yaml must be valid YAML with policy and rules sections."""
+        assert "policy" in default_policy
+        assert "rules" in default_policy
 
-    def test_policy_has_security_rules(self, default_policy):
-        rules = clanet_cli._parse_policy_rules(default_policy)
-        security = [r for r in rules if r["_category"] == "security"]
-        assert len(security) >= 2
+    def test_policy_has_expected_categories(self, default_policy):
+        """example.yaml must define security, safety, and standards categories."""
+        rules = default_policy["rules"]
+        assert "security" in rules
+        assert "safety" in rules
+        assert "standards" in rules
 
-    def test_policy_rule_names_are_descriptive(self, default_policy):
-        rules = clanet_cli._parse_policy_rules(default_policy)
-        for rule in rules:
-            assert len(rule.get("name", "")) > 2, f"Rule name too short: {rule}"
+    def test_policy_has_severity_levels(self, default_policy):
+        """example.yaml must define severity levels."""
+        assert "severity_levels" in default_policy
+        levels = default_policy["severity_levels"]
+        assert "CRITICAL" in levels
+        assert "HIGH" in levels
+        assert "MEDIUM" in levels
+        assert "LOW" in levels
 
 
 # ---------------------------------------------------------------------------
@@ -464,27 +471,53 @@ class TestPolicyLoading:
 
 
 class TestAuditProfile:
+    """Tests for profile filtering logic using inline test data."""
+
+    AUDIT_POLICY = {
+        "rules": {
+            "security": [
+                {"id": "SEC-001", "name": "No plaintext passwords", "severity": "CRITICAL",
+                 "pattern_deny": r"password \S+$"},
+                {"id": "SEC-002", "name": "SSH v2 required", "severity": "HIGH",
+                 "require_in_running": r"ssh.*v(ersion)?\s*2"},
+            ],
+            "safety": [
+                {"id": "SAF-001", "name": "No bulk protocol removal", "severity": "CRITICAL",
+                 "pattern_deny": r"no router (ospf|bgp|isis|eigrp)"},
+            ],
+            "standards": [
+                {"id": "STD-001", "name": "NTP configured", "severity": "MEDIUM",
+                 "require_in_running": "ntp server"},
+                {"id": "STD-002", "name": "Logging configured", "severity": "MEDIUM",
+                 "require_in_running": r"logging.*\d+\.\d+\.\d+\.\d+"},
+            ],
+        }
+    }
+
     @pytest.fixture
-    def default_rules(self):
-        import yaml
-        policy_path = Path(__file__).parent.parent / "policies" / "default.yaml"
-        with open(policy_path) as f:
-            policy = yaml.safe_load(f)
-        return clanet_cli._parse_policy_rules(policy)
+    def rules(self):
+        return clanet_cli._parse_policy_rules(self.AUDIT_POLICY)
 
-    def test_full_profile_includes_all_categories(self, default_rules):
+    def test_full_profile_includes_all_categories(self, rules):
         """full profile should include rules from all categories."""
-        filtered = clanet_cli._filter_rules_by_profile(default_rules, "full")
-        assert len(filtered) == len(default_rules)
+        filtered = clanet_cli._filter_rules_by_profile(rules, "full")
+        assert len(filtered) == len(rules)
         categories = {r["_category"] for r in filtered}
-        assert len(categories) >= 2
+        assert categories == {"security", "safety", "standards"}
 
-    def test_security_profile_subset_of_full(self, default_rules):
+    def test_security_profile_subset_of_full(self, rules):
         """security profile should be a subset of full."""
-        full = clanet_cli._filter_rules_by_profile(default_rules, "full")
-        security = clanet_cli._filter_rules_by_profile(default_rules, "security")
+        full = clanet_cli._filter_rules_by_profile(rules, "full")
+        security = clanet_cli._filter_rules_by_profile(rules, "security")
         assert len(security) <= len(full)
         assert len(security) > 0
+
+    def test_basic_profile_smallest(self, rules):
+        """basic profile should be the smallest subset."""
+        basic = clanet_cli._filter_rules_by_profile(rules, "basic")
+        security = clanet_cli._filter_rules_by_profile(rules, "security")
+        full = clanet_cli._filter_rules_by_profile(rules, "full")
+        assert len(basic) <= len(security) <= len(full)
 
 
 # ---------------------------------------------------------------------------

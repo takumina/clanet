@@ -39,7 +39,7 @@ Use TeamCreate:
 
 Use the Task tool to spawn all three agents **simultaneously** (parallel):
 
-**Agent 1: compliance-checker** (haiku)
+**Agent 1: compliance-checker**
 ```
 subagent_type: compliance-checker
 team_name: clanet-change
@@ -48,12 +48,12 @@ prompt: |
   You are the compliance checker for team clanet-change.
   Wait for a COMPLIANCE CHECK REQUEST from network-operator.
   When received:
-  1. Read policies/default.yaml
+  1. Read policies/example.yaml
   2. Check each proposed command against all rules
   3. Send COMPLIANCE CHECK RESULT with verdict (PASS/WARN/BLOCK) back to network-operator via SendMessage
 ```
 
-**Agent 2: network-operator** (sonnet)
+**Agent 2: network-operator**
 ```
 subagent_type: network-operator
 team_name: clanet-change
@@ -75,7 +75,7 @@ prompt: |
   9. Report final status to team lead
 ```
 
-**Agent 3: validator** (sonnet)
+**Agent 3: validator**
 ```
 subagent_type: validator
 team_name: clanet-change

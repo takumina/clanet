@@ -750,7 +750,7 @@ def _load_policy(args) -> dict | None:
         policy_path = config.get("policy_file")
     # 3. Default
     if not policy_path:
-        policy_path = "policies/default.yaml"
+        policy_path = "policies/example.yaml"
 
     try:
         with open(policy_path) as f:
@@ -774,7 +774,7 @@ def cmd_audit(args):
     policy = _load_policy(args)
     if not policy:
         print("ERROR: No policy file found. Audit requires a policy YAML.", file=sys.stderr)
-        print("  Create one: cp policies/default.yaml policies/my-policy.yaml", file=sys.stderr)
+        print("  Create one: cp policies/example.yaml policies/my-policy.yaml", file=sys.stderr)
         print("  Or specify: --policy path/to/policy.yaml", file=sys.stderr)
         sys.exit(1)
 

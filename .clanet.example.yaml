@@ -7,7 +7,7 @@
 # Custom inventory file path (default: ./inventory.yaml or ~/.net-inventory.yaml)
 # inventory: ./my-inventory.yaml
 
-# Custom compliance policy file (default: policies/default.yaml)
+# Custom compliance policy file (default: policies/example.yaml)
 # policy_file: ./policies/my-company-policy.yaml
 
 # Custom health check / snapshot commands (default: policies/health.yaml)
