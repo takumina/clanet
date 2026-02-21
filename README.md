@@ -18,10 +18,10 @@ Network automation plugin for Claude Code. Powered by [Netmiko](https://github.c
 # Requirements: Python 3.10+
 
 # 1. Install dependencies
-pip install netmiko pyyaml
+pip install -r requirements.txt
 
 # 2. Create your inventory
-cp inventory.example.yaml inventory.yaml
+cp examples/inventory.yaml inventory.yaml
 # Edit inventory.yaml with your device info
 
 # 3. Use the commands
@@ -136,7 +136,7 @@ Claude reads device state, diagnoses the root cause, and suggests a fix.
 For multi-step operations, define context upfront:
 
 ```bash
-cp context.example.yaml context.yaml
+cp examples/context.yaml context.yaml
 # Edit context.yaml with your topology, constraints, and success criteria
 ```
 
@@ -245,7 +245,7 @@ auto_backup: true
 | `health_file` | Path to health check / snapshot commands YAML | `policies/health.yaml` |
 | `context_file` | Path to operation context YAML | `./context.yaml` |
 
-See `.clanet.example.yaml` for a full template.
+See `examples/clanet.yaml` for a full template.
 
 ### Operation Context
 
@@ -253,7 +253,7 @@ Define task-specific network topology, symptoms, constraints, and success criter
 When present, `/clanet:validate`, `/clanet:why`, `/clanet:check`, and `/clanet:team` automatically reference it.
 
 ```bash
-cp context.example.yaml context.yaml
+cp examples/context.yaml context.yaml
 # Edit context.yaml for your task
 python3 lib/clanet_cli.py context   # Verify loading
 ```
@@ -347,11 +347,15 @@ clanet-plugin/
 │   ├── agents/                   # 3 specialized agents
 │   └── skills/team/SKILL.md      # Multi-agent orchestration skill
 ├── lib/clanet_cli.py             # Common CLI engine (single source of truth)
-├── tests/test_cli.py             # 74 unit tests (no network required)
-├── policies/example.yaml         # Compliance rules (customizable)
-├── context.example.yaml          # Operation context template
-├── inventory.example.yaml        # Inventory template
-└── .clanet.example.yaml          # Config template
+├── tests/test_cli.py             # Unit tests (no network required)
+├── policies/
+│   ├── example.yaml              # Compliance rules (customizable)
+│   └── health.yaml               # Health check & snapshot commands
+├── examples/
+│   ├── inventory.yaml            # Device inventory template
+│   ├── context.yaml              # Operation context template
+│   └── clanet.yaml               # Plugin config template
+└── requirements.txt              # Python dependencies
 ```
 
 All 16 commands and 3 agents share `lib/clanet_cli.py` — no duplicated connection or parsing logic.
@@ -369,7 +373,7 @@ All 16 commands and 3 agents share `lib/clanet_cli.py` — no duplicated connect
 
 | Problem | Cause | Solution |
 |---------|-------|----------|
-| `ERROR: inventory.yaml not found` | No inventory file in search paths | `cp inventory.example.yaml inventory.yaml` and edit |
+| `ERROR: inventory.yaml not found` | No inventory file in search paths | `cp examples/inventory.yaml inventory.yaml` and edit |
 | `ERROR: Netmiko is not installed` | Missing Python dependency | `pip install netmiko` |
 | `ERROR: device 'xxx' not found` | Device name not in inventory | Check `inventory.yaml` device names; use exact name or IP |
 | `SSH connection timeout` | Device unreachable or wrong port | Verify host/port in inventory; test with `ssh user@host -p port` |
@@ -379,8 +383,7 @@ All 16 commands and 3 agents share `lib/clanet_cli.py` — no duplicated connect
 ## Requirements
 
 - Python 3.10+
-- Netmiko (`pip install netmiko`)
-- PyYAML (`pip install pyyaml`)
+- Dependencies: `pip install -r requirements.txt` (Netmiko, PyYAML)
 - SSH access to network devices
 
 ## Author

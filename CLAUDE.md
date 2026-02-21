@@ -46,10 +46,14 @@ clanet/
 ├── tests/
 │   └── test_cli.py         # Unit tests (pytest, no network required)
 ├── policies/
-│   └── example.yaml        # Compliance policy template (rules are commented out)
-├── inventory.example.yaml  # Device inventory template
-├── context.example.yaml    # Operation context template
-├── .clanet.example.yaml    # Plugin config template
+│   ├── example.yaml        # Compliance policy template (rules are commented out)
+│   └── health.yaml         # Health check & snapshot commands (per-vendor)
+├── examples/
+│   ├── inventory.yaml      # Device inventory template
+│   ├── context.yaml        # Operation context template
+│   └── clanet.yaml         # Plugin config (.clanet.yaml) template
+├── requirements.txt        # Runtime dependencies (netmiko, pyyaml)
+├── requirements-dev.txt    # Dev dependencies (adds pytest)
 ├── .gitignore
 ├── LICENSE
 └── README.md
@@ -89,8 +93,8 @@ Compliance rules live entirely in YAML files (`policies/example.yaml`). The audi
 ### Dependencies
 
 ```bash
-pip install netmiko pyyaml   # Runtime
-pip install pytest            # Testing
+pip install -r requirements.txt       # Runtime (netmiko, pyyaml)
+pip install -r requirements-dev.txt   # Dev (adds pytest)
 ```
 
 ### Running Tests
@@ -101,7 +105,7 @@ python3 -m pytest tests/test_cli.py -v
 
 Tests are fully offline — no network devices needed. They use fixtures, monkeypatching, and `tmp_path` to test inventory loading, argument parsing, policy evaluation, artifact management, and more.
 
-**Note**: Some tests in `TestHealthConfig` require a `policies/health.yaml` file that is not shipped in the repo. These tests will fail/error in a clean checkout. The health.yaml file defines per-vendor health check and snapshot commands and must be created locally.
+All tests should pass in a clean checkout. `policies/health.yaml` ships with the repo and defines per-vendor health check and snapshot commands.
 
 ### Adding a New Slash Command
 

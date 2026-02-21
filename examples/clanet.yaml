@@ -1,7 +1,8 @@
 # .clanet.yaml - clanet plugin configuration
-# Place this file in your project root or home directory (~/.clanet.yaml).
-# Project-level config takes priority over home-level config.
+# Copy this file to the project root or home directory:
+#   cp examples/clanet.yaml .clanet.yaml
 #
+# Project-level config takes priority over home-level config.
 # Search order: ./.clanet.yaml → ~/.clanet.yaml → built-in defaults
 
 # Custom inventory file path (default: ./inventory.yaml or ~/.net-inventory.yaml)
