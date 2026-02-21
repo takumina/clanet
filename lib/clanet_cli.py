@@ -24,6 +24,9 @@ Subcommands:
     commit    <device|--all>            Commit (IOS-XR/Junos)
     snapshot  <device>                  Capture state snapshot (for validate)
     audit     <device|--all> [--profile basic|security|full]
+    device-info <device>                  Print device metadata as JSON
+    list                                  List all devices in inventory
+    context                               Display loaded operation context
 """
 
 import argparse
@@ -47,62 +50,13 @@ CONFIG_PATHS = [".clanet.yaml", os.path.expanduser("~/.clanet.yaml")]
 DEFAULT_CONFIG: dict = {
     "inventory": None,
     "policy_file": None,
+    "health_file": None,
+    "context_file": None,
     "default_profile": "basic",
     "auto_backup": False,
 }
 
 COMMIT_PLATFORMS = {"cisco_xr", "juniper_junos"}
-
-VENDOR_HEALTH_COMMANDS = {
-    "cisco_ios": [
-        "show ip interface brief",
-        "show ip bgp summary",
-        "show ip ospf neighbor",
-        "show ip route summary",
-    ],
-    "cisco_xr": [
-        "show ip interface brief",
-        "show bgp summary",
-        "show ospf neighbor",
-        "show route summary",
-    ],
-    "juniper_junos": [
-        "show interfaces terse",
-        "show bgp summary",
-        "show ospf neighbor",
-        "show route summary",
-    ],
-    "arista_eos": [
-        "show ip interface brief",
-        "show ip bgp summary",
-        "show ip ospf neighbor",
-        "show ip route summary",
-    ],
-}
-
-VENDOR_SNAPSHOT_COMMANDS = {
-    "cisco_ios": [
-        "show ip interface brief",
-        "show ip bgp summary",
-        "show ip ospf neighbor",
-        "show ip route summary",
-        "show running-config",
-    ],
-    "cisco_xr": [
-        "show ip interface brief",
-        "show bgp summary",
-        "show ospf neighbor",
-        "show route summary",
-        "show running-config",
-    ],
-    "juniper_junos": [
-        "show interfaces terse",
-        "show bgp summary",
-        "show ospf neighbor",
-        "show route summary",
-        "show configuration",
-    ],
-}
 
 # Standard output directory structure
 DIRS = {
@@ -149,6 +103,54 @@ def get_config() -> dict:
     if _config is None:
         _config = load_config()
     return _config
+
+
+def _load_health_config() -> dict:
+    """Load health check / snapshot command definitions from YAML.
+
+    Search order: health_file in .clanet.yaml → policies/health.yaml.
+    Returns dict with keys: health_commands, snapshot_commands, fallback.
+    """
+    config = get_config()
+    health_path = config.get("health_file")
+    if not health_path:
+        health_path = "policies/health.yaml"
+
+    try:
+        with open(health_path) as f:
+            data = yaml.safe_load(f) or {}
+        return data
+    except FileNotFoundError:
+        print(f"ERROR: health config not found: {health_path}", file=sys.stderr)
+        print("  Create one: cp policies/health.yaml policies/my-health.yaml", file=sys.stderr)
+        print("  Or specify: health_file in .clanet.yaml", file=sys.stderr)
+        sys.exit(1)
+
+
+CONTEXT_PATHS = ["context.yaml"]
+
+
+def _load_context() -> dict | None:
+    """Load operation context from context.yaml.
+
+    Search order: context_file in .clanet.yaml → ./context.yaml.
+    Returns None if no context file is found (task-specific context is optional).
+    """
+    config = get_config()
+    context_path = config.get("context_file")
+    if context_path:
+        paths = [context_path]
+    else:
+        paths = list(CONTEXT_PATHS)
+
+    for path in paths:
+        try:
+            with open(path) as f:
+                data = yaml.safe_load(f) or {}
+            return data
+        except FileNotFoundError:
+            continue
+    return None
 
 
 def _expand_env_vars(value: str) -> str:
@@ -418,16 +420,15 @@ def cmd_check(args):
     """Health check on device(s)."""
     inv = load_inventory()
     targets = resolve_targets(inv, _resolve_device_arg(args))
+    hc = _load_health_config()
+    fallback = hc.get("fallback", {}).get("health_commands", ["show ip interface brief"])
 
     for name, dev in targets:
         print(f"\n{'='*60}")
         print(f"Health Check: {name} ({dev['host']})")
         print(f"{'='*60}")
 
-        commands = VENDOR_HEALTH_COMMANDS.get(
-            dev["device_type"],
-            ["show ip interface brief"],
-        )
+        commands = hc.get("health_commands", {}).get(dev["device_type"], fallback)
 
         try:
             conn = connect(dev)
@@ -612,10 +613,11 @@ def cmd_snapshot(args):
     dev = get_device(inv, args.device)
     phase = args.phase  # "pre" or "post"
 
-    commands = VENDOR_SNAPSHOT_COMMANDS.get(
-        dev["device_type"],
-        ["show ip interface brief", "show running-config"],
+    hc = _load_health_config()
+    fallback = hc.get("fallback", {}).get(
+        "snapshot_commands", ["show ip interface brief", "show running-config"]
     )
+    commands = hc.get("snapshot_commands", {}).get(dev["device_type"], fallback)
 
     conn = connect(dev)
     snapshot = {}
@@ -660,9 +662,9 @@ def _parse_policy_rules(policy: dict) -> list[dict]:
 def _filter_rules_by_profile(rules: list[dict], profile: str) -> list[dict]:
     """Filter rules by audit profile.
 
-    - basic: standards のみ
+    - basic: standards only
     - security: security + standards
-    - full: 全カテゴリ
+    - full: all categories
     """
     if profile == "full":
         return rules
@@ -870,6 +872,32 @@ def cmd_list(args):
 
 
 # ---------------------------------------------------------------------------
+# Subcommand: context
+# ---------------------------------------------------------------------------
+
+
+def cmd_context(args):
+    """Display loaded operation context."""
+    ctx = _load_context()
+    if ctx is None:
+        print("No context file found.")
+        print("Create one: cp context.example.yaml context.yaml")
+        return
+
+    for key in ("topology", "symptoms", "constraints", "success_criteria"):
+        value = ctx.get(key)
+        if value is None:
+            continue
+        print(f"--- {key} ---")
+        if isinstance(value, list):
+            for item in value:
+                print(f"  - {item}")
+        else:
+            print(f"  {value.rstrip()}")
+        print()
+
+
+# ---------------------------------------------------------------------------
 # Argument Parser
 # ---------------------------------------------------------------------------
 
@@ -971,6 +999,10 @@ def build_parser() -> argparse.ArgumentParser:
     # list
     p = sub.add_parser("list", help="List all devices in inventory")
     p.set_defaults(func=cmd_list)
+
+    # context
+    p = sub.add_parser("context", help="Display loaded operation context")
+    p.set_defaults(func=cmd_context)
 
     return parser
 

@@ -35,18 +35,30 @@ Parse what needs to be done:
 - Which device(s) are affected?
 - What config changes are needed?
 
-### Step 2: Read Device Info
+### Step 2: Load Operation Context
+
+Read `context.yaml` (if it exists) to understand the task context:
+
+```bash
+source .venv/bin/activate 2>/dev/null || true
+python3 lib/clanet_cli.py context
+```
+
+- `topology` — Understand network layout to generate appropriate commands
+- `constraints` — Respect constraints when generating config (e.g., if "Do not modify OSPF" is listed, avoid OSPF-related commands)
+
+### Step 3: Read Device Info
 
 ```bash
 source .venv/bin/activate 2>/dev/null || true
 python3 lib/clanet_cli.py device-info "$DEVICE_NAME"
 ```
 
-### Step 3: Generate Vendor-Correct Config
+### Step 4: Generate Vendor-Correct Config
 
 Create config commands appropriate for the device_type from Step 2.
 
-### Step 4: Request Compliance Check
+### Step 5: Request Compliance Check
 
 Send the proposed commands to the **compliance-checker** via SendMessage:
 
@@ -60,26 +72,26 @@ Commands:
 ...
 ```
 
-### Step 5: Wait for Verdict
+### Step 6: Wait for Verdict
 
 - **PASS / WARN** → Proceed to Step 6
 - **BLOCK** → STOP. Report to team lead via SendMessage. Do NOT execute.
 
-### Step 6: Take Pre-Change Snapshot
+### Step 7: Take Pre-Change Snapshot
 
 ```bash
 source .venv/bin/activate 2>/dev/null || true
 python3 lib/clanet_cli.py snapshot "$DEVICE_NAME" --phase pre
 ```
 
-### Step 7: Execute Config (only after PASS/WARN)
+### Step 8: Execute Config (only after PASS/WARN)
 
 ```bash
 source .venv/bin/activate 2>/dev/null || true
 python3 lib/clanet_cli.py config "$DEVICE_NAME" --commands "$CONFIG_JSON"
 ```
 
-### Step 8: Notify Validator
+### Step 9: Notify Validator
 
 After execution, send results to the **validator** via SendMessage:
 

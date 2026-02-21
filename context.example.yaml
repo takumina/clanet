@@ -1,0 +1,39 @@
+# context.yaml - Operation Context Definition
+#
+# Template for defining task-specific operation context.
+# Copy this file to context.yaml and edit it for your current task.
+#
+# Usage:
+#   cp context.example.yaml context.yaml
+#   # Edit context.yaml for your task
+#   python3 lib/clanet_cli.py context   # Verify loading
+#
+# To use a custom path, add to .clanet.yaml:
+#   context_file: ./my-context.yaml
+#
+# Connection info is defined in inventory.yaml, not here.
+# All sections are optional. Only include what is relevant to your task.
+
+# Network topology diagram (text format)
+# Used by: /clanet:why, network-operator agent
+topology: |
+  router01 (IOS-XR, AS65001) --- eBGP --- router02 (IOS, AS65002)
+  Management: 192.168.1.0/24
+
+# Current symptoms / observed issues
+# Used by: /clanet:why
+symptoms:
+  - BGP neighbor 10.0.0.2 is in Idle state
+  - No routes received from AS 65002
+
+# Operational constraints (what must NOT be changed)
+# Used by: compliance-checker, network-operator agent
+constraints:
+  - Do not modify OSPF configuration
+  - Do not touch the Management interface
+
+# Success criteria for validation
+# Used by: /clanet:validate, /clanet:check, validator agent
+success_criteria:
+  - BGP neighbor 10.0.0.2 must be Established
+  - All interfaces must be Up

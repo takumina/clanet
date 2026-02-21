@@ -48,7 +48,22 @@ source .venv/bin/activate 2>/dev/null || true
 python3 lib/clanet_cli.py check "$DEVICE_NAME"
 ```
 
-### Step 4: Analyze Results
+### Step 4: Load Operation Context
+
+Read `context.yaml` (if it exists) to check for task-specific success criteria:
+
+```bash
+source .venv/bin/activate 2>/dev/null || true
+python3 lib/clanet_cli.py context
+```
+
+### Step 5: Analyze Results
+
+**If `success_criteria` is defined in context.yaml:**
+- Evaluate each criterion against the post-change state
+- Report PASS/FAIL per criterion
+
+**If `success_criteria` is NOT defined (fallback):**
 
 | Check | PASS condition | FAIL condition |
 |-------|---------------|----------------|
@@ -57,7 +72,7 @@ python3 lib/clanet_cli.py check "$DEVICE_NAME"
 | OSPF | All adjacencies still FULL | Any adjacency lost |
 | Routes | Route count stable (within +/- 10%) | Significant route loss |
 
-### Step 5: Report via SendMessage
+### Step 6: Report via SendMessage
 
 Send validation result to the team lead.
 

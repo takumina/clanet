@@ -28,14 +28,21 @@ Load the compliance policy in this order:
 1. Read `.clanet.yaml` (project root) — if `policy_file` is specified, use that path
 2. If no `.clanet.yaml` or no `policy_file` key, fall back to `policies/default.yaml`
 
-### Step 2: Parse the Request
+### Step 2: Load Operation Context
+
+Use the `Read` tool to read `context.yaml` (if it exists) to check for task-specific constraints.
+If the file does not exist, skip this step.
+
+If `constraints` is defined, add them to the policy check — proposed commands must not violate these task-specific constraints in addition to the global policy rules.
+
+### Step 3: Parse the Request
 
 Extract from the message:
 - **Device name** and **device_type**
 - **Proposed config commands** (numbered list)
 - **Running-config snippet** (if provided by the operator)
 
-### Step 3: Check Each Command Against All Rules
+### Step 4: Check Each Command Against All Rules
 
 For each proposed config command, check against every rule:
 
@@ -55,7 +62,7 @@ Priority order (check these first):
 3. **SEC-001** No plaintext passwords
 4. Then all other rules
 
-### Step 4: Return Verdict via SendMessage
+### Step 5: Return Verdict via SendMessage
 
 Send the result back to the requesting agent using SendMessage with this exact format:
 

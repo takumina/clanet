@@ -147,26 +147,60 @@ class TestCommitPlatform:
 # ---------------------------------------------------------------------------
 
 
-class TestVendorCommands:
-    def test_health_commands_cisco_ios(self):
-        cmds = clanet_cli.VENDOR_HEALTH_COMMANDS["cisco_ios"]
+class TestHealthConfig:
+    """Tests that policies/health.yaml is valid and has expected structure."""
+
+    @pytest.fixture
+    def health_config(self):
+        import yaml
+        health_path = Path(__file__).parent.parent / "policies" / "health.yaml"
+        with open(health_path) as f:
+            return yaml.safe_load(f)
+
+    def test_health_commands_cisco_ios(self, health_config):
+        cmds = health_config["health_commands"]["cisco_ios"]
         assert "show ip interface brief" in cmds
         assert "show ip bgp summary" in cmds
 
-    def test_health_commands_cisco_xr(self):
-        cmds = clanet_cli.VENDOR_HEALTH_COMMANDS["cisco_xr"]
+    def test_health_commands_cisco_xr(self, health_config):
+        cmds = health_config["health_commands"]["cisco_xr"]
         assert "show ip interface brief" in cmds
         assert "show bgp summary" in cmds  # No "ip" prefix for XR
 
-    def test_health_commands_juniper(self):
-        cmds = clanet_cli.VENDOR_HEALTH_COMMANDS["juniper_junos"]
+    def test_health_commands_juniper(self, health_config):
+        cmds = health_config["health_commands"]["juniper_junos"]
         assert "show interfaces terse" in cmds  # Juniper-specific
         assert "show bgp summary" in cmds
 
-    def test_snapshot_commands_include_running_config(self):
-        for vendor, cmds in clanet_cli.VENDOR_SNAPSHOT_COMMANDS.items():
+    def test_snapshot_commands_include_running_config(self, health_config):
+        for vendor, cmds in health_config["snapshot_commands"].items():
             has_config = any("config" in cmd or "configuration" in cmd for cmd in cmds)
             assert has_config, f"{vendor} snapshot missing running-config command"
+
+    def test_load_health_config_success(self, monkeypatch):
+        """_load_health_config() should load from policies/health.yaml."""
+        monkeypatch.setattr(clanet_cli, "_config", {"health_file": None})
+        monkeypatch.chdir(Path(__file__).parent.parent)
+        hc = clanet_cli._load_health_config()
+        assert "health_commands" in hc
+        assert "snapshot_commands" in hc
+        assert "cisco_ios" in hc["health_commands"]
+
+    def test_load_health_config_not_found(self, monkeypatch):
+        """_load_health_config() should exit when health file is not found."""
+        monkeypatch.setattr(clanet_cli, "_config", {"health_file": "/nonexistent/health.yaml"})
+        with pytest.raises(SystemExit):
+            clanet_cli._load_health_config()
+
+    def test_load_health_config_custom_path(self, tmp_path, monkeypatch):
+        """_load_health_config() should respect health_file from config."""
+        import yaml
+        custom = {"health_commands": {"test_vendor": ["show test"]}}
+        custom_file = tmp_path / "custom-health.yaml"
+        custom_file.write_text(yaml.dump(custom))
+        monkeypatch.setattr(clanet_cli, "_config", {"health_file": str(custom_file)})
+        hc = clanet_cli._load_health_config()
+        assert hc["health_commands"]["test_vendor"] == ["show test"]
 
 
 # ---------------------------------------------------------------------------
@@ -346,9 +380,6 @@ class TestConstants:
         assert "snapshots" in clanet_cli.DIRS
         assert "audit" in clanet_cli.DIRS
 
-    def test_vendor_health_commands_keys(self):
-        expected = {"cisco_ios", "cisco_xr", "juniper_junos", "arista_eos"}
-        assert set(clanet_cli.VENDOR_HEALTH_COMMANDS.keys()) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -605,6 +636,73 @@ password 7 045802150C2E
 # ---------------------------------------------------------------------------
 # Environment Variable Expansion
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Context Loading
+# ---------------------------------------------------------------------------
+
+
+class TestContextLoading:
+    def test_load_context_file_exists(self, tmp_path, monkeypatch):
+        """_load_context() should load context when file exists."""
+        import yaml
+        context = {
+            "topology": "router01 --- router02",
+            "symptoms": ["BGP neighbor down"],
+            "constraints": ["OSPF changes prohibited"],
+            "success_criteria": ["BGP Established"],
+        }
+        ctx_file = tmp_path / "context.yaml"
+        ctx_file.write_text(yaml.dump(context, allow_unicode=True))
+        monkeypatch.setattr(clanet_cli, "CONTEXT_PATHS", [str(ctx_file)])
+        monkeypatch.setattr(clanet_cli, "_config", {"context_file": None})
+        result = clanet_cli._load_context()
+        assert result is not None
+        assert result["topology"] == "router01 --- router02"
+        assert result["symptoms"] == ["BGP neighbor down"]
+        assert result["constraints"] == ["OSPF changes prohibited"]
+        assert result["success_criteria"] == ["BGP Established"]
+
+    def test_load_context_file_not_found(self, monkeypatch):
+        """_load_context() should return None when no context file exists."""
+        monkeypatch.setattr(clanet_cli, "CONTEXT_PATHS", ["/nonexistent/context.yaml"])
+        monkeypatch.setattr(clanet_cli, "_config", {"context_file": None})
+        result = clanet_cli._load_context()
+        assert result is None
+
+    def test_load_context_custom_path(self, tmp_path, monkeypatch):
+        """_load_context() should respect context_file from config."""
+        import yaml
+        context = {"success_criteria": ["All interfaces Up"]}
+        custom_file = tmp_path / "my-context.yaml"
+        custom_file.write_text(yaml.dump(context))
+        monkeypatch.setattr(clanet_cli, "_config", {"context_file": str(custom_file)})
+        result = clanet_cli._load_context()
+        assert result is not None
+        assert result["success_criteria"] == ["All interfaces Up"]
+
+    def test_load_context_empty_file(self, tmp_path, monkeypatch):
+        """_load_context() should return empty dict for empty YAML file."""
+        ctx_file = tmp_path / "context.yaml"
+        ctx_file.write_text("")
+        monkeypatch.setattr(clanet_cli, "CONTEXT_PATHS", [str(ctx_file)])
+        monkeypatch.setattr(clanet_cli, "_config", {"context_file": None})
+        result = clanet_cli._load_context()
+        # empty YAML returns None from safe_load, converted to {}
+        assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# Context Subcommand Parser
+# ---------------------------------------------------------------------------
+
+
+class TestContextSubcommand:
+    def test_context_parser(self):
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["context"])
+        assert args.command == "context"
 
 
 class TestEnvVarExpansion:

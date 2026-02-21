@@ -40,7 +40,16 @@ python3 lib/clanet_cli.py snapshot "$DEVICE_NAME" --phase post
 
 6. **Phase 4: Compare and analyze**
 
-   Read both snapshot files from `snapshots/` and analyze:
+   First, check if `context.yaml` exists (use `Read` tool or `python3 lib/clanet_cli.py context`).
+   If not found, skip to the default checks below.
+
+   Then read both snapshot files from `snapshots/` and analyze:
+
+   **If `success_criteria` is defined in context.yaml:**
+   - Evaluate each criterion against the post-change state
+   - Report PASS/FAIL per criterion
+
+   **If `success_criteria` is NOT defined (fallback):**
    - **Interface changes**: Any interface went down?
    - **BGP changes**: Any neighbor lost?
    - **OSPF changes**: Any adjacency lost?

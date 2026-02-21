@@ -10,8 +10,14 @@
 # Custom compliance policy file (default: policies/default.yaml)
 # policy_file: ./policies/my-company-policy.yaml
 
+# Custom health check / snapshot commands (default: policies/health.yaml)
+# health_file: ./policies/my-health.yaml
+
 # Default audit profile: basic | security | full (default: basic)
 # default_profile: security
 
 # Auto-backup running-config before applying changes (default: false)
 # auto_backup: true
+
+# Operation context file for task-specific topology/constraints (default: ./context.yaml)
+# context_file: ./my-context.yaml

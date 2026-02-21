@@ -80,6 +80,97 @@ cp inventory.example.yaml inventory.yaml
 |---------|-------------|
 | `/clanet:team <device> <task>` | 3-agent team for safe config changes (compliance → execute → validate) |
 
+## How to Use
+
+### 1. Check device health
+
+```bash
+# Single device
+/clanet:check router01
+
+# All devices
+/clanet:check --all
+```
+
+### 2. Run show commands
+
+```bash
+/clanet:cmd router01 show ip route
+/clanet:cmd router01 show bgp summary
+```
+
+### 3. Troubleshoot an issue
+
+```bash
+/clanet:why router01 BGP neighbor 10.0.0.2 is down
+```
+
+Claude reads device state, diagnoses the root cause, and suggests a fix.
+
+### 4. Apply a config change (single command)
+
+```bash
+/clanet:config router01
+# Claude will ask what to configure, assess risk, and confirm before applying
+```
+
+### 5. Validated config change (with snapshot diff)
+
+```bash
+/clanet:validate router01
+# 1. Takes pre-change snapshot
+# 2. Applies config (after confirmation)
+# 3. Takes post-change snapshot
+# 4. Compares and reports PASS/FAIL
+# 5. Offers rollback if FAIL
+```
+
+### 6. Multi-agent team change (safest)
+
+```bash
+/clanet:team router01 Set description "Uplink to core-sw01" on GigabitEthernet0/0/0/0
+# compliance-checker → validates against policy
+# network-operator   → generates and applies config
+# validator          → verifies health after change
+```
+
+### 7. Use operation context for complex tasks
+
+For multi-step operations, define context upfront:
+
+```bash
+cp context.example.yaml context.yaml
+# Edit context.yaml with your topology, constraints, and success criteria
+```
+
+```yaml
+# context.yaml
+topology: |
+  router01 (IOS-XR) --- eBGP --- router02 (IOS)
+constraints:
+  - Do not modify OSPF configuration
+success_criteria:
+  - BGP neighbor 10.0.0.2 must be Established
+```
+
+Then run any command as usual — clanet automatically reads the context:
+
+```bash
+/clanet:validate router01    # Uses success_criteria for PASS/FAIL
+/clanet:why router01 BGP down # Uses topology + symptoms for diagnosis
+/clanet:team router01 Fix BGP # All 3 agents respect constraints
+```
+
+### 8. Compliance audit
+
+```bash
+# Basic audit
+/clanet:audit router01
+
+# Security-focused audit on all devices
+/clanet:audit --all --profile security
+```
+
 ## Safety First
 
 Every configuration change follows the **"Show, Explain, Confirm, Verify"** workflow:
@@ -102,7 +193,7 @@ Built-in safety features:
 clanet includes AI agent teams for complex operations. Run `/clanet:team` to activate:
 
 ```bash
-/clanet:team router01 Add NTP server 10.0.0.1
+/clanet:team router01 Set description "Uplink to core-sw01" on GigabitEthernet0/0/0/0
 ```
 
 Three specialized agents coordinate automatically:
@@ -156,8 +247,58 @@ auto_backup: true
 | `policy_file` | Path to compliance policy YAML | `policies/default.yaml` |
 | `default_profile` | Default audit profile (`basic`/`security`/`full`) | `basic` |
 | `auto_backup` | Auto-backup before config changes | `false` |
+| `health_file` | Path to health check / snapshot commands YAML | `policies/health.yaml` |
+| `context_file` | Path to operation context YAML | `./context.yaml` |
 
 See `.clanet.example.yaml` for a full template.
+
+### Operation Context
+
+Define task-specific network topology, symptoms, constraints, and success criteria in `context.yaml`.
+When present, `/clanet:validate`, `/clanet:why`, `/clanet:check`, and `/clanet:team` automatically reference it.
+
+```bash
+cp context.example.yaml context.yaml
+# Edit context.yaml for your task
+python3 lib/clanet_cli.py context   # Verify loading
+```
+
+```yaml
+# context.yaml
+topology: |
+  router01 (IOS-XR) --- eBGP --- router02 (IOS)
+symptoms:
+  - BGP neighbor 10.0.0.2 is in Idle state
+constraints:
+  - Do not modify OSPF configuration
+success_criteria:
+  - BGP neighbor 10.0.0.2 must be Established
+```
+
+| Section | Used by |
+|---------|---------|
+| `topology` | `/clanet:why`, network-operator |
+| `symptoms` | `/clanet:why` |
+| `constraints` | compliance-checker, network-operator |
+| `success_criteria` | `/clanet:validate`, `/clanet:check`, validator |
+
+To use a custom path, set `context_file` in `.clanet.yaml`.
+
+### Custom Health Check Commands
+
+Commands executed by `/clanet:check` and `/clanet:snapshot` are defined in `policies/health.yaml`.
+Customize freely (e.g., remove OSPF checks, add MPLS checks) without code changes.
+
+```bash
+cp policies/health.yaml policies/my-health.yaml
+# Edit policies/my-health.yaml
+```
+
+Then point to it in `.clanet.yaml`:
+
+```yaml
+health_file: ./policies/my-health.yaml
+```
 
 ### Custom Compliance Policy
 
@@ -211,8 +352,9 @@ clanet-plugin/
 │   ├── agents/                   # 3 specialized agents
 │   └── skills/team/SKILL.md      # Multi-agent orchestration skill
 ├── lib/clanet_cli.py             # Common CLI engine (single source of truth)
-├── tests/test_cli.py             # 40 unit tests (no network required)
+├── tests/test_cli.py             # 74 unit tests (no network required)
 ├── policies/default.yaml         # Compliance rules (customizable)
+├── context.example.yaml          # Operation context template
 ├── inventory.example.yaml        # Inventory template
 └── .clanet.example.yaml          # Config template
 ```

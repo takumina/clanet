@@ -24,3 +24,6 @@ python3 lib/clanet_cli.py check "${ARGUMENT:---all}"
    - BGP neighbor status (Established / down)
    - OSPF neighbor status (Full / not found)
    - Overall health: HEALTHY / WARNING / CRITICAL
+
+4. If `context.yaml` exists, read it (use `Read` tool or `python3 lib/clanet_cli.py context`).
+   If `success_criteria` is defined, also evaluate each criterion and include in the summary.

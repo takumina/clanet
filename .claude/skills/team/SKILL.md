@@ -49,8 +49,10 @@ team_name: clanet-change
 name: compliance-checker
 prompt: |
   You are the compliance checker for team clanet-change.
+  First, use the Read tool to read context.yaml for task-specific constraints (skip if not found).
   Wait for a compliance check request from network-operator.
   When you receive it, load policies/default.yaml and validate the proposed commands.
+  If context.yaml has constraints, also check against those.
   Send your verdict (PASS/WARN/BLOCK) back to network-operator via SendMessage.
 ```
 
@@ -65,8 +67,9 @@ prompt: |
   Target device: <device>
 
   Follow your autonomous workflow:
+  0. First, read context.yaml to understand topology and constraints
   1. Read inventory to get device info
-  2. Generate vendor-correct config commands
+  2. Generate vendor-correct config commands (respecting any constraints from context.yaml)
   3. Send to compliance-checker for validation via SendMessage
   4. Wait for verdict
   5. If PASS/WARN: take pre-change snapshot, execute config, log it
@@ -81,9 +84,11 @@ team_name: clanet-change
 name: validator
 prompt: |
   You are the validator for team clanet-change.
+  First, read context.yaml to check for task-specific success criteria.
   Wait for notification from network-operator that a change was applied.
   When notified, run post-change health checks on the device.
   Compare with pre-change snapshot if available.
+  If context.yaml has success_criteria, use those for PASS/FAIL judgment.
   Report PASS or FAIL to the team lead via SendMessage.
 ```
 

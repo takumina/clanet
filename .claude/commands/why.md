@@ -10,7 +10,11 @@ Intelligently diagnose network issues OR explain existing configurations.
 
 ## Instructions
 
-1. Parse the argument: device name and question/problem description.
+1. First, read `context.yaml` if it exists (use `Read` tool or `python3 lib/clanet_cli.py context`):
+   - `topology` — Understand the network layout to guide diagnosis
+   - `symptoms` — Combine with user input to prioritize which commands to run
+
+2. Parse the argument: device name and question/problem description.
    Determine the **mode** based on the user's question:
 
    ### Mode A: Troubleshooting
@@ -19,7 +23,7 @@ Intelligently diagnose network issues OR explain existing configurations.
    ### Mode B: Config explanation
    Keywords: "why is ... configured", "what does ... do", "explain", "what is ... for"
 
-2. Based on the mode, determine which commands to run.
+3. Based on the mode, determine which commands to run.
 
    **Mode A - Troubleshooting commands:**
 
@@ -46,14 +50,14 @@ Intelligently diagnose network issues OR explain existing configurations.
 
    Adapt commands to vendor type (cisco_ios, cisco_xr, juniper_junos, arista_eos).
 
-3. Execute each command:
+4. Execute each command:
 
 ```bash
 source .venv/bin/activate 2>/dev/null || true
 python3 lib/clanet_cli.py show "$DEVICE_NAME" $COMMAND
 ```
 
-4. **Mode A - Present diagnosis:**
+5. **Mode A - Present diagnosis:**
 
    ```
    ## Diagnosis: <device-name>
@@ -73,7 +77,7 @@ python3 lib/clanet_cli.py show "$DEVICE_NAME" $COMMAND
    /clanet:config <device> (with specific commands)
    ```
 
-5. **Mode B - Present config analysis:**
+6. **Mode B - Present config analysis:**
 
    ```
    ## Config Analysis: <device-name>
@@ -90,5 +94,5 @@ python3 lib/clanet_cli.py show "$DEVICE_NAME" $COMMAND
    - <brief explanation of underlying protocol/feature>
    ```
 
-6. If initial commands are insufficient, run additional commands.
-7. If the problem spans multiple devices, suggest checking the peer device too.
+7. If initial commands are insufficient, run additional commands.
+8. If the problem spans multiple devices, suggest checking the peer device too.
