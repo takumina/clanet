@@ -36,9 +36,35 @@ import re
 import socket
 import sys
 import time
-import yaml
 from datetime import datetime
 from pathlib import Path
+
+import yaml
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+
+class ClanetError(Exception):
+    """Base exception for all clanet errors."""
+
+
+class InventoryNotFoundError(ClanetError):
+    """Inventory file not found in any search path."""
+
+
+class DeviceNotFoundError(ClanetError):
+    """Device not found in inventory."""
+
+
+class DeviceConnectionError(ClanetError):
+    """Failed to connect to a device."""
+
+
+class ConfigError(ClanetError):
+    """Configuration or health file loading failed."""
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -54,6 +80,8 @@ DEFAULT_CONFIG: dict = {
     "context_file": None,
     "default_profile": "basic",
     "auto_backup": False,
+    "read_timeout": 30,
+    "read_timeout_long": 60,
 }
 
 COMMIT_PLATFORMS = {"cisco_xr", "juniper_junos"}
@@ -121,10 +149,11 @@ def _load_health_config() -> dict:
             data = yaml.safe_load(f) or {}
         return data
     except FileNotFoundError:
-        print(f"ERROR: health config not found: {health_path}", file=sys.stderr)
-        print("  Create one: cp policies/health.yaml policies/my-health.yaml", file=sys.stderr)
-        print("  Or specify: health_file in .clanet.yaml", file=sys.stderr)
-        sys.exit(1)
+        raise ConfigError(
+            f"health config not found: {health_path}"
+            " (create one: cp policies/health.yaml policies/my-health.yaml"
+            " or specify health_file in .clanet.yaml)"
+        )
 
 
 CONTEXT_PATHS = ["context.yaml"]
@@ -187,9 +216,9 @@ def load_inventory() -> dict:
                 return inv
         except FileNotFoundError:
             continue
-    print("ERROR: inventory.yaml not found", file=sys.stderr)
-    print("Searched:", ", ".join(paths), file=sys.stderr)
-    sys.exit(1)
+    raise InventoryNotFoundError(
+        f"inventory.yaml not found (searched: {', '.join(paths)})"
+    )
 
 
 def get_device(inv: dict, name: str) -> dict:
@@ -205,10 +234,10 @@ def get_device(inv: dict, name: str) -> dict:
         if dev.get("host") == name:
             return dev
 
-    print(f"ERROR: device '{name}' not found in inventory", file=sys.stderr)
     available = ", ".join(sorted(devices.keys()))
-    print(f"Available devices: {available}", file=sys.stderr)
-    sys.exit(1)
+    raise DeviceNotFoundError(
+        f"device '{name}' not found in inventory (available: {available})"
+    )
 
 
 def resolve_targets(inv: dict, target: str) -> list[tuple[str, dict]]:
@@ -228,15 +257,16 @@ def connect(dev: dict):
     try:
         from netmiko import ConnectHandler
     except ImportError:
-        print("ERROR: Netmiko is not installed. Run: pip install netmiko", file=sys.stderr)
-        sys.exit(1)
+        raise DeviceConnectionError(
+            "Netmiko is not installed. Run: pip install netmiko"
+        )
 
     required = ["device_type", "host", "username", "password"]
     missing = [f for f in required if f not in dev]
     if missing:
-        print(f"ERROR: device config missing required fields: {', '.join(missing)}",
-              file=sys.stderr)
-        sys.exit(1)
+        raise DeviceConnectionError(
+            f"device config missing required fields: {', '.join(missing)}"
+        )
 
     return ConnectHandler(
         device_type=dev["device_type"],
@@ -297,9 +327,10 @@ def cmd_info(args):
     """Show device info (show version)."""
     inv = load_inventory()
     dev = get_device(inv, args.device)
+    config = get_config()
     conn = connect(dev)
     try:
-        output = conn.send_command("show version", read_timeout=30)
+        output = conn.send_command("show version", read_timeout=config["read_timeout"])
         print(output)
     finally:
         conn.disconnect()
@@ -314,10 +345,11 @@ def cmd_show(args):
     """Execute a show/operational command."""
     inv = load_inventory()
     dev = get_device(inv, args.device)
+    config = get_config()
     command = " ".join(args.command)
     conn = connect(dev)
     try:
-        output = conn.send_command(command, read_timeout=30)
+        output = conn.send_command(command, read_timeout=config["read_timeout"])
         print(output)
     finally:
         conn.disconnect()
@@ -335,9 +367,10 @@ def cmd_config(args):
     try:
         commands = json.loads(args.commands)
     except json.JSONDecodeError as e:
-        print(f"ERROR: --commands is not valid JSON: {e}", file=sys.stderr)
-        print('  Expected format: --commands \'["cmd1", "cmd2"]\'', file=sys.stderr)
-        sys.exit(1)
+        raise ConfigError(
+            f'--commands is not valid JSON: {e}'
+            ' (expected format: --commands \'["cmd1", "cmd2"]\')'
+        )
 
     conn = connect(dev)
     try:
@@ -368,8 +401,7 @@ def cmd_deploy(args):
 
     config_file = Path(args.file)
     if not config_file.exists():
-        print(f"ERROR: config file '{args.file}' not found", file=sys.stderr)
-        sys.exit(1)
+        raise ConfigError(f"config file '{args.file}' not found")
 
     conn = connect(dev)
     try:
@@ -400,9 +432,10 @@ def cmd_interact(args):
     try:
         commands = json.loads(args.commands)
     except json.JSONDecodeError as e:
-        print(f"ERROR: --commands is not valid JSON: {e}", file=sys.stderr)
-        print('  Expected format: --commands \'["cmd1", "cmd2"]\'', file=sys.stderr)
-        sys.exit(1)
+        raise ConfigError(
+            f'--commands is not valid JSON: {e}'
+            ' (expected format: --commands \'["cmd1", "cmd2"]\')'
+        )
 
     conn = connect(dev)
     try:
@@ -429,6 +462,7 @@ def _resolve_device_arg(args) -> str:
 def cmd_check(args):
     """Health check on device(s)."""
     inv = load_inventory()
+    config = get_config()
     targets = resolve_targets(inv, _resolve_device_arg(args))
     hc = _load_health_config()
     fallback = hc.get("fallback", {}).get("health_commands", ["show ip interface brief"])
@@ -445,7 +479,7 @@ def cmd_check(args):
             for cmd in commands:
                 print(f"\n--- {cmd} ---")
                 try:
-                    print(conn.send_command(cmd, read_timeout=30))
+                    print(conn.send_command(cmd, read_timeout=config["read_timeout"]))
                 except Exception as e:
                     print(f"[WARN] {e}")
             conn.disconnect()
@@ -462,12 +496,14 @@ def cmd_check(args):
 def cmd_backup(args):
     """Backup running configuration."""
     inv = load_inventory()
+    config = get_config()
     targets = resolve_targets(inv, _resolve_device_arg(args))
 
     for name, dev in targets:
         try:
             conn = connect(dev)
-            output = conn.send_command("show running-config", read_timeout=60)
+            output = conn.send_command("show running-config",
+                                       read_timeout=config["read_timeout_long"])
             conn.disconnect()
 
             filepath = save_artifact("backups", name, output, ext=".cfg")
@@ -551,9 +587,9 @@ def cmd_mode(args):
             print(f"Config mode: {conn.check_config_mode()}")
             print(f"Prompt: {conn.find_prompt()}")
         else:
-            print(f"ERROR: unknown action '{action}'", file=sys.stderr)
-            print("Valid actions: enable, config, exit-config, check", file=sys.stderr)
-            sys.exit(1)
+            raise ClanetError(
+                f"unknown action '{action}' (valid: enable, config, exit-config, check)"
+            )
     finally:
         conn.disconnect()
 
@@ -621,6 +657,7 @@ def cmd_snapshot(args):
     """Capture device state snapshot (pre or post change)."""
     inv = load_inventory()
     dev = get_device(inv, args.device)
+    config = get_config()
     phase = args.phase  # "pre" or "post"
 
     hc = _load_health_config()
@@ -635,7 +672,7 @@ def cmd_snapshot(args):
         for cmd in commands:
             print(f"--- {cmd} ---")
             try:
-                output = conn.send_command(cmd, read_timeout=60)
+                output = conn.send_command(cmd, read_timeout=config["read_timeout_long"])
                 snapshot[cmd] = output
                 print(output)
             except Exception as e:
@@ -783,17 +820,17 @@ def cmd_audit(args):
     # Load policy (required — all rules come from external YAML)
     policy = _load_policy(args)
     if not policy:
-        print("ERROR: No policy file found. Audit requires a policy YAML.", file=sys.stderr)
-        print("  Create one: cp policies/example.yaml policies/my-policy.yaml", file=sys.stderr)
-        print("  Or specify: --policy path/to/policy.yaml", file=sys.stderr)
-        sys.exit(1)
+        raise ConfigError(
+            "No policy file found. Audit requires a policy YAML."
+            " (create one: cp policies/example.yaml policies/my-policy.yaml"
+            " or specify: --policy path/to/policy.yaml)"
+        )
 
     policy_name = policy.get("policy", {}).get("name", "unknown")
     print(f"Policy name: {policy_name}")
     policy_rules = _parse_policy_rules(policy)
     if not policy_rules:
-        print("ERROR: Policy file contains no rules.", file=sys.stderr)
-        sys.exit(1)
+        raise ConfigError("Policy file contains no rules.")
 
     for name, dev in targets:
         print(f"\n{'='*60}")
@@ -802,7 +839,8 @@ def cmd_audit(args):
 
         try:
             conn = connect(dev)
-            running = conn.send_command("show running-config", read_timeout=60)
+            running = conn.send_command("show running-config",
+                                       read_timeout=config["read_timeout_long"])
             conn.disconnect()
         except Exception as e:
             print(f"[FAIL] {name}: cannot connect - {e}")
@@ -822,8 +860,8 @@ def cmd_audit(args):
         total = len(results)
         score = int((pass_count / total) * 100) if total > 0 else 0
 
-        print(f"\n| # | Check | Severity | Status |")
-        print(f"|---|-------|----------|--------|")
+        print("\n| # | Check | Severity | Status |")
+        print("|---|-------|----------|--------|")
         for i, (check_name, status, severity, _detail) in enumerate(results, 1):
             if status == "PASS":
                 marker = "[OK]"
@@ -1030,6 +1068,9 @@ def main():
     except KeyboardInterrupt:
         print("\nAborted.", file=sys.stderr)
         sys.exit(130)
+    except ClanetError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)

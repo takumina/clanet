@@ -22,3 +22,9 @@
 
 # Operation context file for task-specific topology/constraints (default: ./context.yaml)
 # context_file: ./my-context.yaml
+
+# Read timeout in seconds for show commands (default: 30)
+# read_timeout: 45
+
+# Read timeout in seconds for long-running commands like show running-config (default: 60)
+# read_timeout_long: 120
