@@ -1316,6 +1316,31 @@ class TestArtifactPermissions:
         mode = stat.S_IMODE(Path(filepath).stat().st_mode)
         assert mode == 0o600
 
+    def test_log_file_permission_0600(self, tmp_path, monkeypatch):
+        """log_operation() should create log file with 0600 permissions."""
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        clanet_cli.log_operation("r1", "config", "test")
+        import stat
+        log_file = tmp_path / "logs" / "clanet_operations.log"
+        mode = stat.S_IMODE(log_file.stat().st_mode)
+        assert mode == 0o600
+
+    def test_log_file_permission_preserved_on_append(self, tmp_path, monkeypatch):
+        """Appending to log should not change permissions."""
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        clanet_cli.log_operation("r1", "config", "first")
+        clanet_cli.log_operation("r1", "config", "second")
+        import stat
+        log_file = tmp_path / "logs" / "clanet_operations.log"
+        mode = stat.S_IMODE(log_file.stat().st_mode)
+        assert mode == 0o600
+        lines = log_file.read_text().strip().split("\n")
+        assert len(lines) == 2
+
 
 # ---------------------------------------------------------------------------
 # Snapshot Redaction
@@ -1325,7 +1350,8 @@ class TestArtifactPermissions:
 class TestSnapshotRedaction:
     """Tests that snapshots redact sensitive config output."""
 
-    def test_snapshot_redacts_passwords(self, mock_inventory, tmp_path, monkeypatch):
+    def _run_snapshot(self, mock_inventory, tmp_path, monkeypatch):
+        """Helper: run snapshot with sensitive output and return (file_content, stdout)."""
         mock_conn = MagicMock()
         mock_conn.send_command.return_value = (
             "hostname R1\npassword 7 045802150C2E\n"
@@ -1343,7 +1369,19 @@ class TestSnapshotRedaction:
         args = parser.parse_args(["snapshot", "router01", "--phase", "pre"])
         clanet_cli.cmd_snapshot(args)
         snapshot_files = list((tmp_path / "snapshots").glob("router01_pre_*.json"))
-        content = snapshot_files[0].read_text()
+        return snapshot_files[0].read_text()
+
+    def test_snapshot_redacts_passwords(self, mock_inventory, tmp_path, monkeypatch):
+        content = self._run_snapshot(mock_inventory, tmp_path, monkeypatch)
         assert "045802150C2E" not in content
         assert "public" not in content
         assert "***" in content
+
+    def test_snapshot_console_output_redacted(self, mock_inventory, tmp_path,
+                                              monkeypatch, capsys):
+        """Console output during snapshot must also be redacted."""
+        self._run_snapshot(mock_inventory, tmp_path, monkeypatch)
+        captured = capsys.readouterr()
+        assert "045802150C2E" not in captured.out
+        assert "public" not in captured.out
+        assert "***" in captured.out
