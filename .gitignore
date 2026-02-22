@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+.venv
 .venv/
 venv/
 
@@ -27,8 +28,9 @@ context.yaml
 # pytest
 .pytest_cache/
 
-# Evaluation (local review only)
+# Local reports (not tracked)
 EVALUATION.md
+PLAN.md
 
 # OS
 .DS_Store
