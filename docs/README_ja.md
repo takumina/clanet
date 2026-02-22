@@ -357,11 +357,10 @@ export NET_PASSWORD='your-secure-password'
 
 ```
 clanet/
-├── .claude-plugin/plugin.json    # プラグインメタデータ
-├── .claude/
-│   ├── commands/                 # 16 のスラッシュコマンド
-│   ├── agents/                   # 3 つの専門エージェント
-│   └── skills/team/SKILL.md      # マルチエージェントオーケストレーション
+├── .claude-plugin/plugin.json    # プラグインマニフェスト
+├── commands/                     # 16 のスラッシュコマンド
+├── agents/                       # 3 つの専門エージェント
+├── skills/team/SKILL.md          # マルチエージェントオーケストレーション
 ├── lib/clanet_cli.py             # 共通 CLI エンジン（単一ソースオブトゥルース）
 ├── tests/test_cli.py             # ユニットテスト（ネットワーク不要）
 ├── policies/
@@ -381,9 +380,9 @@ clanet/
 |---------|------|-----|
 | **SSH・デバイス自動化** | Python (Netmiko) `lib/clanet_cli.py` | 接続、コマンド実行、バックアップ、スナップショット、ログ |
 | **ポリシーエンジン** | Python 正規表現 `_evaluate_rule()` | `pattern_deny`, `require`, `recommend` — 決定論的ルール評価 |
-| **安全ワークフロー** | プロンプト定義 `.claude/commands/` | 「表示→説明→確認→検証」— 構造化されたプロンプトシーケンス |
+| **安全ワークフロー** | プロンプト定義 `commands/` | 「表示→説明→確認→検証」— 構造化されたプロンプトシーケンス |
 | **リスク評価・診断** | Claude の LLM 推論（プロンプトで誘導） | `/clanet:why` のトラブルシューティング、変更リスク判定 |
-| **エージェント連携** | Claude Code エージェントフレームワーク `.claude/agents/` | ツール制限付きの役割分離エージェント |
+| **エージェント連携** | Claude Code エージェントフレームワーク `agents/` | ツール制限付きの役割分離エージェント |
 
 clanet は Claude Code プラグインです。プロンプト設計とツール連携により、Claude の推論能力をネットワーク運用に活用します。「知性」は Claude 自身が提供し、clanet はドメイン知識・安全ガードレール・デバイス自動化レイヤーを提供します。
 

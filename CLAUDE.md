@@ -15,32 +15,31 @@ clanet is a **Claude Code plugin** for network automation, powered by [Netmiko](
 
 ```
 clanet/
-├── .claude/
-│   ├── commands/           # 16 slash command definitions (Markdown)
-│   │   ├── clanet.md       # /clanet — connect and show version
-│   │   ├── cmd.md          # /clanet:cmd — execute show commands
-│   │   ├── config.md       # /clanet:config — apply config (with safety)
-│   │   ├── deploy.md       # /clanet:deploy — deploy config from file
-│   │   ├── interactive.md  # /clanet:interactive — interactive commands
-│   │   ├── check.md        # /clanet:check — health check
-│   │   ├── backup.md       # /clanet:backup — backup running-config
-│   │   ├── session.md      # /clanet:session — connectivity check
-│   │   ├── mode.md         # /clanet:mode — enable/config mode switching
-│   │   ├── save.md         # /clanet:save — write memory
-│   │   ├── commit.md       # /clanet:commit — commit (IOS-XR/Junos)
-│   │   ├── validate.md     # /clanet:validate — pre/post snapshot diff
-│   │   ├── why.md          # /clanet:why — network troubleshooting
-│   │   ├── audit.md        # /clanet:audit — compliance audit
-│   │   ├── team.md         # /clanet:team — multi-agent team change
-│   │   └── safety-guide.md # [internal] shared safety framework
-│   ├── agents/             # 3 specialized agent definitions
-│   │   ├── compliance-checker.md  # Policy validation (read-only)
-│   │   ├── network-operator.md    # Config generation + execution
-│   │   └── validator.md           # Post-change health verification
-│   └── skills/
-│       └── team/SKILL.md   # Multi-agent orchestration skill
 ├── .claude-plugin/
-│   └── plugin.json         # Claude Code marketplace metadata
+│   └── plugin.json         # Claude Code plugin manifest
+├── commands/               # 16 slash command definitions (Markdown)
+│   ├── clanet.md           # /clanet — connect and show version
+│   ├── cmd.md              # /clanet:cmd — execute show commands
+│   ├── config.md           # /clanet:config — apply config (with safety)
+│   ├── deploy.md           # /clanet:deploy — deploy config from file
+│   ├── interactive.md      # /clanet:interactive — interactive commands
+│   ├── check.md            # /clanet:check — health check
+│   ├── backup.md           # /clanet:backup — backup running-config
+│   ├── session.md          # /clanet:session — connectivity check
+│   ├── mode.md             # /clanet:mode — enable/config mode switching
+│   ├── save.md             # /clanet:save — write memory
+│   ├── commit.md           # /clanet:commit — commit (IOS-XR/Junos)
+│   ├── validate.md         # /clanet:validate — pre/post snapshot diff
+│   ├── why.md              # /clanet:why — network troubleshooting
+│   ├── audit.md            # /clanet:audit — compliance audit
+│   ├── team.md             # /clanet:team — multi-agent team change
+│   └── safety-guide.md     # [internal] shared safety framework
+├── agents/                 # 3 specialized agent definitions
+│   ├── compliance-checker.md  # Policy validation (read-only)
+│   ├── network-operator.md    # Config generation + execution
+│   └── validator.md           # Post-change health verification
+├── skills/
+│   └── team/SKILL.md       # Multi-agent orchestration skill
 ├── lib/
 │   └── clanet_cli.py       # Core CLI engine (single source of truth)
 ├── tests/
@@ -77,7 +76,7 @@ The three agents have strict boundaries:
 
 ### Safety-First Config Changes
 
-All config-changing commands follow the **"Show, Explain, Confirm, Verify"** pattern defined in `.claude/commands/safety-guide.md`. Self-lockout prevention blocks changes to management interfaces, VTY ACLs, and management routing.
+All config-changing commands follow the **"Show, Explain, Confirm, Verify"** pattern defined in `commands/safety-guide.md`. Self-lockout prevention blocks changes to management interfaces, VTY ACLs, and management routing.
 
 ### External-Only Policy Rules
 
@@ -131,7 +130,7 @@ All tests should pass in a clean checkout. `policies/health.yaml` ships with the
 
 ### Adding a New Slash Command
 
-1. Create `.claude/commands/<name>.md` with frontmatter (`description`, `argument-hint`, `allowed-tools`)
+1. Create `commands/<name>.md` with frontmatter (`description`, `argument-hint`, `allowed-tools`)
 2. The command markdown should instruct Claude to call `python3 lib/clanet_cli.py <subcommand> ...`
 3. If the command changes device config, reference the safety-guide.md framework
 4. Add the corresponding subcommand handler in `lib/clanet_cli.py` (function `cmd_<name>`)
@@ -140,10 +139,10 @@ All tests should pass in a clean checkout. `policies/health.yaml` ships with the
 
 ### Adding a New Agent
 
-1. Create `.claude/agents/<name>.md` with frontmatter (`name`, `description`, `tools`)
+1. Create `agents/<name>.md` with frontmatter (`name`, `description`, `tools`)
 2. Define hard constraints (what the agent must NEVER do)
 3. Define the autonomous workflow as numbered steps
-4. If the agent participates in team orchestration, update `.claude/skills/team/SKILL.md`
+4. If the agent participates in team orchestration, update `skills/team/SKILL.md`
 
 ### Code Conventions
 

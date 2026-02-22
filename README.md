@@ -343,11 +343,10 @@ devices:
 
 ```
 clanet-plugin/
-├── .claude-plugin/plugin.json    # Marketplace metadata
-├── .claude/
-│   ├── commands/                 # 16 slash commands
-│   ├── agents/                   # 3 specialized agents
-│   └── skills/team/SKILL.md      # Multi-agent orchestration skill
+├── .claude-plugin/plugin.json    # Plugin manifest
+├── commands/                     # 16 slash commands
+├── agents/                       # 3 specialized agents
+├── skills/team/SKILL.md          # Multi-agent orchestration skill
 ├── lib/clanet_cli.py             # Common CLI engine (single source of truth)
 ├── tests/test_cli.py             # Unit tests (no network required)
 ├── policies/
@@ -368,9 +367,9 @@ All 16 commands and 3 agents share `lib/clanet_cli.py` — no duplicated connect
 |-------|---------------|----------|
 | **SSH & device automation** | Python (Netmiko) in `lib/clanet_cli.py` | Connection, command execution, backup, snapshot, logging |
 | **Policy engine** | Python regex engine in `_evaluate_rule()` | `pattern_deny`, `require`, `recommend` — deterministic rule evaluation |
-| **Safety workflows** | Prompt definitions in `.claude/commands/` | "Show, Explain, Confirm, Verify" — structured prompt sequences |
+| **Safety workflows** | Prompt definitions in `commands/` | "Show, Explain, Confirm, Verify" — structured prompt sequences |
 | **Risk assessment & diagnosis** | Claude's LLM reasoning, directed by prompts | `/clanet:why` troubleshooting, config change risk levels |
-| **Agent coordination** | Claude Code agent framework (`.claude/agents/`) | Role-separated agents with tool restrictions |
+| **Agent coordination** | Claude Code agent framework (`agents/`) | Role-separated agents with tool restrictions |
 
 clanet is a Claude Code plugin — it structures prompts and orchestrates tools to leverage Claude's reasoning for network operations. The "intelligence" comes from Claude itself; clanet provides the domain expertise, safety guardrails, and device automation layer.
 
