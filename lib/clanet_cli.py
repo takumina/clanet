@@ -82,6 +82,8 @@ DEFAULT_CONFIG: dict = {
     "auto_backup": False,
     "read_timeout": 30,
     "read_timeout_long": 60,
+    "connect_timeout": 5,
+    "session_test_delay": 1,
 }
 
 COMMIT_PLATFORMS = {"cisco_xr", "juniper_junos"}
@@ -94,13 +96,23 @@ DIRS = {
     "audit": "audit",
 }
 
+# Default file paths (used when .clanet.yaml does not specify overrides)
+DEFAULT_SSH_PORT = 22
+DEFAULT_HEALTH_PATH = "policies/health.yaml"
+DEFAULT_POLICY_PATH = "policies/example.yaml"
+LOG_FILENAME = "clanet_operations.log"
+
 # Standard timestamp formats
 TS_LOG = "%Y-%m-%d %H:%M:%S"
 TS_FILE = "%Y%m%d_%H%M%S"
 
+# Display formatting
+DISPLAY_WIDTH = 62
+
 # Patterns matching sensitive values to redact in logs and artifacts
 _SENSITIVE_RE = re.compile(
-    r'(?i)((?:password|secret|community|key-string)\s+(?:\d+\s+)?)\S+'
+    r'(?i)((?:password|secret|community|key-string|tacacs-key|radius-key'
+    r'|authentication-key|crypto\s+key)\s+(?:\d+\s+)?)\S+'
 )
 
 # ---------------------------------------------------------------------------
@@ -147,7 +159,7 @@ def _load_health_config() -> dict:
     config = get_config()
     health_path = config.get("health_file")
     if not health_path:
-        health_path = "policies/health.yaml"
+        health_path = DEFAULT_HEALTH_PATH
 
     try:
         with open(health_path) as f:
@@ -237,7 +249,7 @@ def load_inventory() -> dict:
             if inv and "devices" in inv:
                 _warn_plaintext_passwords(inv)
                 for dev in inv["devices"].values():
-                    for field in ("password", "username"):
+                    for field in ("password", "username", "secret"):
                         if field in dev and isinstance(dev[field], str):
                             dev[field] = _expand_env_vars(dev[field])
                 return inv
@@ -300,7 +312,7 @@ def connect(dev: dict):
         host=dev["host"],
         username=dev["username"],
         password=dev["password"],
-        port=dev.get("port", 22),
+        port=dev.get("port", DEFAULT_SSH_PORT),
     )
 
 
@@ -328,7 +340,7 @@ def log_operation(device: str, action: str, detail: str = "", status: str = "SUC
     entry = f"[{ts}] DEVICE={device} ACTION={action} STATUS={status}"
     if detail:
         entry += f" DETAIL={_redact_sensitive(detail)}"
-    log_file = log_dir / "clanet_operations.log"
+    log_file = log_dir / LOG_FILENAME
     fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(fd, "a") as f:
         f.write(entry + "\n")
@@ -353,14 +365,27 @@ def save_artifact(dir_type: str, device: str, content: str, suffix: str = "",
 # ---------------------------------------------------------------------------
 
 
+def _get_vendor_command(hc: dict, section: str, device_type: str, fallback_key: str) -> str:
+    """Resolve a per-vendor command string from health config.
+
+    Looks up hc[section][device_type], falling back to hc['fallback'][fallback_key].
+    """
+    cmd = hc.get(section, {}).get(device_type)
+    if cmd:
+        return cmd
+    return hc.get("fallback", {}).get(fallback_key, "show version")
+
+
 def cmd_info(args):
     """Show device info (show version)."""
     inv = load_inventory()
     dev = get_device(inv, args.device)
     config = get_config()
+    hc = _load_health_config()
+    info_cmd = _get_vendor_command(hc, "info_command", dev["device_type"], "info_command")
     conn = connect(dev)
     try:
-        output = conn.send_command("show version", read_timeout=config["read_timeout"])
+        output = conn.send_command(info_cmd, read_timeout=config["read_timeout"])
         print(output)
     finally:
         conn.disconnect()
@@ -498,9 +523,9 @@ def cmd_check(args):
     fallback = hc.get("fallback", {}).get("health_commands", ["show ip interface brief"])
 
     for name, dev in targets:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * DISPLAY_WIDTH}")
         print(f"Health Check: {name} ({dev['host']})")
-        print(f"{'='*60}")
+        print(f"{'=' * DISPLAY_WIDTH}")
 
         commands = hc.get("health_commands", {}).get(dev["device_type"], fallback)
 
@@ -527,12 +552,15 @@ def cmd_backup(args):
     """Backup running configuration."""
     inv = load_inventory()
     config = get_config()
+    hc = _load_health_config()
     targets = resolve_targets(inv, _resolve_device_arg(args))
 
     for name, dev in targets:
         try:
+            running_cmd = _get_vendor_command(
+                hc, "running_config_command", dev["device_type"], "running_config_command")
             conn = connect(dev)
-            output = conn.send_command("show running-config",
+            output = conn.send_command(running_cmd,
                                        read_timeout=config["read_timeout_long"])
             conn.disconnect()
 
@@ -551,16 +579,17 @@ def cmd_backup(args):
 def cmd_session(args):
     """Check connectivity and session status."""
     inv = load_inventory()
+    config = get_config()
     targets = resolve_targets(inv, _resolve_device_arg(args))
 
     for name, dev in targets:
         host = dev["host"]
-        port = dev.get("port", 22)
+        port = dev.get("port", DEFAULT_SSH_PORT)
 
         # TCP port check
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(5)
+            s.settimeout(config["connect_timeout"])
             result = s.connect_ex((host, port))
             s.close()
 
@@ -575,7 +604,7 @@ def cmd_session(args):
 
         # Netmiko connection test (if action requires it)
         if args.action in ("prompt", "alive"):
-            time.sleep(1)
+            time.sleep(config["session_test_delay"])
             try:
                 conn = connect(dev)
                 if args.action == "prompt":
@@ -828,7 +857,7 @@ def _load_policy(args) -> dict | None:
         policy_path = config.get("policy_file")
     # 3. Default
     if not policy_path:
-        policy_path = "policies/example.yaml"
+        policy_path = DEFAULT_POLICY_PATH
 
     try:
         with open(policy_path) as f:
@@ -846,6 +875,7 @@ def cmd_audit(args):
     targets = resolve_targets(inv, _resolve_device_arg(args))
 
     config = get_config()
+    hc = _load_health_config()
     profile = args.profile or config.get("default_profile", "basic")
 
     # Load policy (required — all rules come from external YAML)
@@ -864,13 +894,15 @@ def cmd_audit(args):
         raise ConfigError("Policy file contains no rules.")
 
     for name, dev in targets:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * DISPLAY_WIDTH}")
         print(f"Audit: {name} ({dev['host']}) - profile: {profile}")
-        print(f"{'='*60}")
+        print(f"{'=' * DISPLAY_WIDTH}")
 
         try:
+            running_cmd = _get_vendor_command(
+                hc, "running_config_command", dev["device_type"], "running_config_command")
             conn = connect(dev)
-            running = conn.send_command("show running-config",
+            running = conn.send_command(running_cmd,
                                        read_timeout=config["read_timeout_long"])
             conn.disconnect()
         except Exception as e:
@@ -929,7 +961,7 @@ def cmd_device_info(args):
     info = {
         "device_type": dev["device_type"],
         "host": dev["host"],
-        "port": dev.get("port", 22),
+        "port": dev.get("port", DEFAULT_SSH_PORT),
         "needs_commit": needs_commit(dev),
     }
     print(json.dumps(info, indent=2))
@@ -945,7 +977,7 @@ def cmd_list(args):
     inv = load_inventory()
     devices = inv.get("devices", {})
     print(f"{'Name':<20} {'Host':<18} {'Type':<18} {'Port':<6}")
-    print("-" * 62)
+    print("-" * DISPLAY_WIDTH)
     for name, dev in sorted(devices.items()):
         print(f"{name:<20} {dev['host']:<18} {dev['device_type']:<18} {dev.get('port', 22):<6}")
 
