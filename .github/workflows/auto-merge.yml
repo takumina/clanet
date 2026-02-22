@@ -1,0 +1,54 @@
+name: Auto-merge claude branches
+
+on:
+  push:
+    branches:
+      - 'claude/**'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: |
+          pip install ruff
+          ruff check lib/ tests/
+
+      - name: Run tests
+        run: python -m pytest tests/ -v --tb=short
+
+  auto-merge:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge to main and clean up
+        run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          echo "Merging $BRANCH into main..."
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout main
+          git merge "origin/$BRANCH" --no-ff -m "Auto-merge: ${BRANCH}"
+          git push origin main
+
+          echo "Deleting remote branch $BRANCH..."
+          git push origin --delete "$BRANCH" || echo "Branch already deleted"
