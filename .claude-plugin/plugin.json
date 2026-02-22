@@ -1,13 +1,14 @@
 {
   "name": "clanet",
+  "version": "0.2.0",
   "description": "Safety-first network automation for Claude Code. Run commands, backup configs, deploy changes with AI risk assessment, and audit compliance — all through slash commands. Powered by Netmiko.",
   "author": {
     "name": "takumina",
     "url": "https://github.com/takumina"
   },
-  "version": "0.2.0",
-  "license": "MIT",
+  "homepage": "https://github.com/takumina/clanet",
   "repository": "https://github.com/takumina/clanet",
+  "license": "MIT",
   "keywords": [
     "network",
     "automation",
@@ -19,16 +20,5 @@
     "infrastructure",
     "compliance",
     "multi-agent"
-  ],
-  "categories": [
-    "networking",
-    "infrastructure",
-    "devops"
-  ],
-  "homepage": "https://github.com/takumina/clanet",
-  "dependencies": {
-    "python": ">=3.10",
-    "pip": ["netmiko", "pyyaml"]
-  },
-  "installation_instructions": "pip install -r requirements.txt && cp examples/inventory.yaml inventory.yaml"
+  ]
 }
