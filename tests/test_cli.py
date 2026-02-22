@@ -1173,3 +1173,215 @@ class TestSubcommandIntegration:
         # Verify audit report saved
         audit_files = list((tmp_path / "audit").glob("router01_*.md"))
         assert len(audit_files) == 1
+
+
+# ---------------------------------------------------------------------------
+# Sensitive Data Redaction
+# ---------------------------------------------------------------------------
+
+
+class TestRedactSensitive:
+    """Tests for _redact_sensitive()."""
+
+    def test_redact_plaintext_password(self):
+        assert clanet_cli._redact_sensitive("password Cisco123") == "password ***"
+
+    def test_redact_type7_password(self):
+        assert clanet_cli._redact_sensitive("password 7 045802150C2E") == "password 7 ***"
+
+    def test_redact_enable_secret(self):
+        result = clanet_cli._redact_sensitive("enable secret 5 $1$abc$hash")
+        assert result == "enable secret 5 ***"
+
+    def test_redact_snmp_community(self):
+        result = clanet_cli._redact_sensitive("snmp-server community public RO")
+        assert "public" not in result
+        assert "community ***" in result
+
+    def test_redact_key_string(self):
+        result = clanet_cli._redact_sensitive("key-string MySecretKey")
+        assert result == "key-string ***"
+
+    def test_no_redact_safe_command(self):
+        safe = "ntp server 10.0.0.1"
+        assert clanet_cli._redact_sensitive(safe) == safe
+
+    def test_no_redact_interface(self):
+        safe = "interface GigabitEthernet0/0"
+        assert clanet_cli._redact_sensitive(safe) == safe
+
+    def test_redact_multiline(self):
+        config = "hostname R1\npassword Cisco123\nntp server 10.0.0.1"
+        result = clanet_cli._redact_sensitive(config)
+        assert "Cisco123" not in result
+        assert "ntp server 10.0.0.1" in result
+
+    def test_redact_case_insensitive(self):
+        assert "Secret123" not in clanet_cli._redact_sensitive("Password Secret123")
+
+
+# ---------------------------------------------------------------------------
+# Plaintext Password Warning
+# ---------------------------------------------------------------------------
+
+
+class TestPlaintextPasswordWarning:
+    """Tests for _warn_plaintext_passwords()."""
+
+    def test_warns_on_plaintext(self, capsys):
+        inv = {"devices": {"r1": {"password": "admin123"}}}
+        clanet_cli._warn_plaintext_passwords(inv)
+        captured = capsys.readouterr()
+        assert "[SECURITY]" in captured.err
+        assert "r1" in captured.err
+
+    def test_no_warn_on_env_var(self, capsys):
+        inv = {"devices": {"r1": {"password": "${DEVICE_PASSWORD}"}}}
+        clanet_cli._warn_plaintext_passwords(inv)
+        captured = capsys.readouterr()
+        assert captured.err == ""
+
+    def test_no_warn_on_empty_password(self, capsys):
+        inv = {"devices": {"r1": {"password": ""}}}
+        clanet_cli._warn_plaintext_passwords(inv)
+        captured = capsys.readouterr()
+        assert captured.err == ""
+
+    def test_warns_multiple_devices(self, capsys):
+        inv = {"devices": {
+            "r1": {"password": "plain1"},
+            "r2": {"password": "${SAFE}"},
+            "r3": {"password": "plain3"},
+        }}
+        clanet_cli._warn_plaintext_passwords(inv)
+        captured = capsys.readouterr()
+        assert "r1" in captured.err
+        assert "r2" not in captured.err
+        assert "r3" in captured.err
+
+    def test_load_inventory_warns(self, mock_inventory, capsys):
+        """load_inventory() should emit warnings for plaintext passwords."""
+        clanet_cli.load_inventory()
+        captured = capsys.readouterr()
+        assert "[SECURITY]" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Log Redaction
+# ---------------------------------------------------------------------------
+
+
+class TestLogRedaction:
+    """Tests that log_operation() redacts sensitive values."""
+
+    def test_log_redacts_password_command(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        clanet_cli.log_operation(
+            "router01", "config",
+            "username admin password 0 Cisco123; enable secret MySecret"
+        )
+        log_file = tmp_path / "logs" / "clanet_operations.log"
+        content = log_file.read_text()
+        assert "Cisco123" not in content
+        assert "MySecret" not in content
+        assert "password 0 ***" in content
+        assert "secret ***" in content
+
+    def test_log_keeps_safe_commands(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        clanet_cli.log_operation("router01", "config", "ntp server 10.0.0.1")
+        log_file = tmp_path / "logs" / "clanet_operations.log"
+        content = log_file.read_text()
+        assert "ntp server 10.0.0.1" in content
+
+
+# ---------------------------------------------------------------------------
+# Artifact File Permissions
+# ---------------------------------------------------------------------------
+
+
+class TestArtifactPermissions:
+    """Tests that saved artifacts have restricted file permissions."""
+
+    def test_artifact_permission_0600(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "backups": str(tmp_path / "backups"),
+        })
+        filepath = clanet_cli.save_artifact("backups", "r1", "content", ext=".cfg")
+        import stat
+        mode = stat.S_IMODE(Path(filepath).stat().st_mode)
+        assert mode == 0o600
+
+    def test_log_file_permission_0600(self, tmp_path, monkeypatch):
+        """log_operation() should create log file with 0600 permissions."""
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        clanet_cli.log_operation("r1", "config", "test")
+        import stat
+        log_file = tmp_path / "logs" / "clanet_operations.log"
+        mode = stat.S_IMODE(log_file.stat().st_mode)
+        assert mode == 0o600
+
+    def test_log_file_permission_preserved_on_append(self, tmp_path, monkeypatch):
+        """Appending to log should not change permissions."""
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        clanet_cli.log_operation("r1", "config", "first")
+        clanet_cli.log_operation("r1", "config", "second")
+        import stat
+        log_file = tmp_path / "logs" / "clanet_operations.log"
+        mode = stat.S_IMODE(log_file.stat().st_mode)
+        assert mode == 0o600
+        lines = log_file.read_text().strip().split("\n")
+        assert len(lines) == 2
+
+
+# ---------------------------------------------------------------------------
+# Snapshot Redaction
+# ---------------------------------------------------------------------------
+
+
+class TestSnapshotRedaction:
+    """Tests that snapshots redact sensitive config output."""
+
+    def _run_snapshot(self, mock_inventory, tmp_path, monkeypatch):
+        """Helper: run snapshot with sensitive output and return (file_content, stdout)."""
+        mock_conn = MagicMock()
+        mock_conn.send_command.return_value = (
+            "hostname R1\npassword 7 045802150C2E\n"
+            "snmp-server community public RO\n"
+        )
+        monkeypatch.setattr(clanet_cli, "connect", lambda dev: mock_conn)
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "snapshots": str(tmp_path / "snapshots"),
+        })
+        monkeypatch.setattr(clanet_cli, "_config", {
+            "health_file": None, "read_timeout": 30, "read_timeout_long": 60,
+        })
+        monkeypatch.chdir(Path(__file__).parent.parent)
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["snapshot", "router01", "--phase", "pre"])
+        clanet_cli.cmd_snapshot(args)
+        snapshot_files = list((tmp_path / "snapshots").glob("router01_pre_*.json"))
+        return snapshot_files[0].read_text()
+
+    def test_snapshot_redacts_passwords(self, mock_inventory, tmp_path, monkeypatch):
+        content = self._run_snapshot(mock_inventory, tmp_path, monkeypatch)
+        assert "045802150C2E" not in content
+        assert "public" not in content
+        assert "***" in content
+
+    def test_snapshot_console_output_redacted(self, mock_inventory, tmp_path,
+                                              monkeypatch, capsys):
+        """Console output during snapshot must also be redacted."""
+        self._run_snapshot(mock_inventory, tmp_path, monkeypatch)
+        captured = capsys.readouterr()
+        assert "045802150C2E" not in captured.out
+        assert "public" not in captured.out
+        assert "***" in captured.out

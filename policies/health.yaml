@@ -86,6 +86,24 @@ snapshot_commands:
     - show ip ospf neighbor
     - show ip route
 
+# --- Per-vendor "show version" equivalent ---
+# Used by: /clanet (info)
+info_command:
+  cisco_ios: "show version"
+  cisco_xr: "show version"
+  cisco_nxos: "show version"
+  juniper_junos: "show version"
+  arista_eos: "show version"
+
+# --- Per-vendor running-config command ---
+# Used by: /clanet:backup, /clanet:audit
+running_config_command:
+  cisco_ios: "show running-config"
+  cisco_xr: "show running-config"
+  cisco_nxos: "show running-config"
+  juniper_junos: "show configuration"
+  arista_eos: "show running-config"
+
 # --- Fallback Commands ---
 # Used when device_type is not listed above.
 fallback:
@@ -97,3 +115,5 @@ fallback:
     - show running-config
     - show ip interface brief
     - show ip route
+  info_command: "show version"
+  running_config_command: "show running-config"
