@@ -1,0 +1,66 @@
+name: Auto-merge claude branches
+
+on:
+  push:
+    branches:
+      - 'claude/**'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: |
+          pip install ruff
+          ruff check lib/ tests/
+
+      - name: Run tests
+        run: python -m pytest tests/ -v --tb=short
+
+  auto-merge:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create PR and merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+
+          # Check if PR already exists
+          EXISTING=$(gh pr list --head "$BRANCH" --base main --state open --json number -q '.[0].number')
+
+          if [ -n "$EXISTING" ]; then
+            echo "PR #$EXISTING already exists, merging..."
+            PR_NUMBER="$EXISTING"
+          else
+            echo "Creating PR from $BRANCH to main..."
+            PR_URL=$(gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "Auto-merge: ${BRANCH}" \
+              --body "Automated PR from \`${BRANCH}\`.")
+            PR_NUMBER=$(echo "$PR_URL" | grep -o '[0-9]*$')
+            echo "Created PR #$PR_NUMBER"
+          fi
+
+          echo "Merging PR #$PR_NUMBER..."
+          gh pr merge "$PR_NUMBER" --merge --auto
