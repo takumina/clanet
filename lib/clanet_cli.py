@@ -39,7 +39,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import yaml
+try:
+    import yaml
+except ImportError:
+    print("ERROR: PyYAML is not installed. Run: pip install pyyaml", file=sys.stderr)
+    sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # Exceptions

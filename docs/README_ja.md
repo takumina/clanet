@@ -25,9 +25,13 @@
 # 2. プラグインをインストール
 /plugin install clanet@clanet-marketplace
 
-# 3. インベントリを作成
-cp examples/inventory.yaml inventory.yaml
-# inventory.yaml を編集してデバイス情報を入力
+# 3. Python 依存パッケージをインストール
+pip install netmiko pyyaml
+
+# 4. インベントリを作成
+cp examples/inventory.yaml ~/.net-inventory.yaml
+# ~/.net-inventory.yaml を編集してデバイス情報を入力
+# ヒント: パスワードには ${ENV_VAR} 形式を推奨（セキュリティ項目を参照）
 ```
 
 ### 手動セットアップ

@@ -25,9 +25,13 @@ Network automation plugin for Claude Code. Powered by [Netmiko](https://github.c
 # 2. Install the plugin
 /plugin install clanet@clanet-marketplace
 
-# 3. Create your inventory
-cp examples/inventory.yaml inventory.yaml
-# Edit inventory.yaml with your device info
+# 3. Install Python dependencies
+pip install netmiko pyyaml
+
+# 4. Create your inventory
+cp examples/inventory.yaml ~/.net-inventory.yaml
+# Edit ~/.net-inventory.yaml with your device info
+# Tip: Use ${ENV_VAR} syntax for passwords (see Security Considerations)
 ```
 
 ### Manual setup
