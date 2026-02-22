@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   test:
@@ -39,28 +38,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Create PR and merge
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Merge to main and clean up
         run: |
           BRANCH="${GITHUB_REF#refs/heads/}"
+          echo "Merging $BRANCH into main..."
 
-          # Check if PR already exists
-          EXISTING=$(gh pr list --head "$BRANCH" --base main --state open --json number -q '.[0].number')
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if [ -n "$EXISTING" ]; then
-            echo "PR #$EXISTING already exists, merging..."
-            PR_NUMBER="$EXISTING"
-          else
-            echo "Creating PR from $BRANCH to main..."
-            PR_URL=$(gh pr create \
-              --base main \
-              --head "$BRANCH" \
-              --title "Auto-merge: ${BRANCH}" \
-              --body "Automated PR from \`${BRANCH}\`.")
-            PR_NUMBER=$(echo "$PR_URL" | grep -o '[0-9]*$')
-            echo "Created PR #$PR_NUMBER"
-          fi
+          git checkout main
+          git merge "origin/$BRANCH" --no-ff -m "Auto-merge: ${BRANCH}"
+          git push origin main
 
-          echo "Merging PR #$PR_NUMBER..."
-          gh pr merge "$PR_NUMBER" --merge --delete-branch
+          echo "Deleting remote branch $BRANCH..."
+          git push origin --delete "$BRANCH" || echo "Branch already deleted"
