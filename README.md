@@ -345,7 +345,7 @@ devices:
 clanet-plugin/
 ├── .claude-plugin/plugin.json    # Marketplace metadata
 ├── .claude/
-│   ├── commands/                 # 15 slash commands
+│   ├── commands/                 # 16 slash commands
 │   ├── agents/                   # 3 specialized agents
 │   └── skills/team/SKILL.md      # Multi-agent orchestration skill
 ├── lib/clanet_cli.py             # Common CLI engine (single source of truth)
