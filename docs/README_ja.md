@@ -14,19 +14,40 @@
 - **Pre/Post 検証** — 変更前後のスナップショット自動取得と差分比較
 - **マルチベンダー** — Cisco IOS/XR/NX-OS、Juniper、Arista 他、Netmiko 対応機器全般
 
-## クイックスタート
+## インストール
+
+### マーケットプレイスから（推奨）
+
+```bash
+# 1. マーケットプレイスを追加
+/plugin marketplace add takumina/clanet-marketplace
+
+# 2. プラグインをインストール
+/plugin install clanet@clanet-marketplace
+
+# 3. インベントリを作成
+cp examples/inventory.yaml inventory.yaml
+# inventory.yaml を編集してデバイス情報を入力
+```
+
+### 手動セットアップ
 
 ```bash
 # 前提: Python 3.10+
 
-# 1. 依存パッケージをインストール
-pip install netmiko pyyaml
+# 1. クローンして依存パッケージをインストール
+git clone https://github.com/takumina/clanet.git
+cd clanet
+pip install -r requirements.txt
 
 # 2. インベントリを作成
 cp examples/inventory.yaml inventory.yaml
 # inventory.yaml を編集してデバイス情報を入力
+```
 
-# 3. コマンドを使う
+## クイックスタート
+
+```bash
 /clanet router01
 /clanet:cmd router01 show ip route
 /clanet:check --all

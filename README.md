@@ -14,19 +14,40 @@ Network automation plugin for Claude Code. Powered by [Netmiko](https://github.c
 - **Pre/post validation** — automatic snapshots and diff for change verification
 - **Multi-vendor** — Cisco IOS/XR/NX-OS, Juniper, Arista, and more via Netmiko
 
-## Quick Start
+## Installation
+
+### From marketplace (recommended)
+
+```bash
+# 1. Add the marketplace
+/plugin marketplace add takumina/clanet-marketplace
+
+# 2. Install the plugin
+/plugin install clanet@clanet-marketplace
+
+# 3. Create your inventory
+cp examples/inventory.yaml inventory.yaml
+# Edit inventory.yaml with your device info
+```
+
+### Manual setup
 
 ```bash
 # Requirements: Python 3.10+
 
-# 1. Install dependencies
+# 1. Clone and install dependencies
+git clone https://github.com/takumina/clanet.git
+cd clanet
 pip install -r requirements.txt
 
 # 2. Create your inventory
 cp examples/inventory.yaml inventory.yaml
 # Edit inventory.yaml with your device info
+```
 
-# 3. Use the commands
+## Quick Start
+
+```bash
 /clanet router01
 /clanet:cmd router01 show ip route
 /clanet:check --all
