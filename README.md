@@ -18,20 +18,27 @@ Network automation plugin for Claude Code. Powered by [Netmiko](https://github.c
 
 ### From marketplace (recommended)
 
+**Step 1** — Add the marketplace
+
 ```bash
-# 1. Add the marketplace
 /plugin marketplace add takumina/clanet-marketplace
+```
 
-# 2. Install the plugin
+**Step 2** — Install the plugin
+
+```bash
 /plugin install clanet@clanet-marketplace
+```
 
-# 3. Install Python dependencies
+**Step 3** — Install Python dependencies
+
+```bash
 pip install netmiko pyyaml
 ```
 
-#### 4. Create your inventory file
+**Step 4** — Create your inventory file
 
-Marketplace installs don't include template files locally. Paste the following into your terminal to create the inventory file:
+Marketplace installs don't include template files locally. Paste the following into your terminal:
 
 ```bash
 cat <<'EOF' > ~/.net-inventory.yaml
