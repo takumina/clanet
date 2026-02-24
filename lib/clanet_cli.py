@@ -167,7 +167,11 @@ def _load_health_config() -> dict:
 
     try:
         with open(health_path) as f:
-            data = yaml.safe_load(f) or {}
+            data = yaml.safe_load(f)
+        if not isinstance(data, dict):
+            raise ConfigError(
+                f"invalid health config format in {health_path}: must be a YAML mapping"
+            )
         return data
     except FileNotFoundError:
         raise ConfigError(
@@ -250,13 +254,17 @@ def load_inventory() -> dict:
         try:
             with open(path) as f:
                 inv = yaml.safe_load(f)
-            if inv and "devices" in inv:
-                _warn_plaintext_passwords(inv)
-                for dev in inv["devices"].values():
-                    for field in ("password", "username", "secret"):
-                        if field in dev and isinstance(dev[field], str):
-                            dev[field] = _expand_env_vars(dev[field])
-                return inv
+            if not isinstance(inv, dict) or not isinstance(inv.get("devices"), dict):
+                raise ConfigError(
+                    f"invalid inventory format in {path}: "
+                    "'devices' must be a YAML mapping"
+                )
+            _warn_plaintext_passwords(inv)
+            for dev in inv["devices"].values():
+                for field in ("password", "username", "secret"):
+                    if field in dev and isinstance(dev[field], str):
+                        dev[field] = _expand_env_vars(dev[field])
+            return inv
         except FileNotFoundError:
             continue
     raise InventoryNotFoundError(
@@ -300,23 +308,25 @@ def connect(dev: dict):
     try:
         from netmiko import ConnectHandler
     except ImportError:
-        raise DeviceConnectionError(
+        raise ConfigError(
             "Netmiko is not installed. Run: pip install netmiko"
         )
 
     required = ["device_type", "host", "username", "password"]
     missing = [f for f in required if f not in dev]
     if missing:
-        raise DeviceConnectionError(
+        raise ConfigError(
             f"device config missing required fields: {', '.join(missing)}"
         )
 
+    config = get_config()
     return ConnectHandler(
         device_type=dev["device_type"],
         host=dev["host"],
         username=dev["username"],
         password=dev["password"],
         port=dev.get("port", DEFAULT_SSH_PORT),
+        timeout=config["connect_timeout"],
     )
 
 
@@ -419,17 +429,34 @@ def cmd_show(args):
 # ---------------------------------------------------------------------------
 
 
-def cmd_config(args):
-    """Apply configuration commands."""
-    inv = load_inventory()
-    dev = get_device(inv, args.device)
+def _validate_json_commands(raw: str) -> list[str]:
+    """Parse and validate JSON command list from --commands argument."""
     try:
-        commands = json.loads(args.commands)
+        commands = json.loads(raw)
     except json.JSONDecodeError as e:
         raise ConfigError(
             f'--commands is not valid JSON: {e}'
             ' (expected format: --commands \'["cmd1", "cmd2"]\')'
         )
+    if not isinstance(commands, list):
+        raise ConfigError(
+            f"--commands must be a JSON array, got {type(commands).__name__}"
+        )
+    if not commands:
+        raise ConfigError("--commands list is empty")
+    for i, cmd in enumerate(commands):
+        if not isinstance(cmd, str):
+            raise ConfigError(
+                f"command #{i + 1} must be a string, got {type(cmd).__name__}"
+            )
+    return commands
+
+
+def cmd_config(args):
+    """Apply configuration commands."""
+    inv = load_inventory()
+    dev = get_device(inv, args.device)
+    commands = _validate_json_commands(args.commands)
 
     conn = connect(dev)
     try:
@@ -488,13 +515,7 @@ def cmd_interact(args):
     """Execute interactive commands with expect patterns."""
     inv = load_inventory()
     dev = get_device(inv, args.device)
-    try:
-        commands = json.loads(args.commands)
-    except json.JSONDecodeError as e:
-        raise ConfigError(
-            f'--commands is not valid JSON: {e}'
-            ' (expected format: --commands \'["cmd1", "cmd2"]\')'
-        )
+    commands = _validate_json_commands(args.commands)
 
     conn = connect(dev)
     try:
@@ -535,16 +556,20 @@ def cmd_check(args):
 
         try:
             conn = connect(dev)
-            for cmd in commands:
-                print(f"\n--- {cmd} ---")
-                try:
-                    print(conn.send_command(cmd, read_timeout=config["read_timeout"]))
-                except Exception as e:
-                    print(f"[WARN] {e}")
-            conn.disconnect()
-            print(f"\n[OK] {name} health check complete")
-        except Exception as e:
+            try:
+                for cmd in commands:
+                    print(f"\n--- {cmd} ---")
+                    try:
+                        print(conn.send_command(cmd, read_timeout=config["read_timeout"]))
+                    except Exception as e:
+                        print(f"[WARN] {cmd}: {e}")
+            finally:
+                conn.disconnect()
+            print(f"\n[OK] {name}: health check complete")
+        except ClanetError as e:
             print(f"\n[FAIL] {name}: {e}")
+        except Exception as e:
+            print(f"\n[FAIL] {name}: unexpected error — {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -564,15 +589,19 @@ def cmd_backup(args):
             running_cmd = _get_vendor_command(
                 hc, "running_config_command", dev["device_type"], "running_config_command")
             conn = connect(dev)
-            output = conn.send_command(running_cmd,
-                                       read_timeout=config["read_timeout_long"])
-            conn.disconnect()
+            try:
+                output = conn.send_command(running_cmd,
+                                           read_timeout=config["read_timeout_long"])
+            finally:
+                conn.disconnect()
 
             filepath = save_artifact("backups", name, output, ext=".cfg")
             log_operation(name, "backup", f"file={filepath}")
-            print(f"[OK] {name} → {filepath}")
-        except Exception as e:
+            print(f"[OK] {name}: backup saved to {filepath}")
+        except ClanetError as e:
             print(f"[FAIL] {name}: {e}")
+        except Exception as e:
+            print(f"[FAIL] {name}: unexpected error — {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -592,10 +621,9 @@ def cmd_session(args):
 
         # TCP port check
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(config["connect_timeout"])
-            result = s.connect_ex((host, port))
-            s.close()
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(config["connect_timeout"])
+                result = s.connect_ex((host, port))
 
             if result == 0:
                 print(f"[OK] {name} ({host}:{port}) - SSH port open")
@@ -675,13 +703,17 @@ def cmd_save(args):
 
         try:
             conn = connect(dev)
-            output = conn.save_config()
-            conn.disconnect()
+            try:
+                output = conn.save_config()
+            finally:
+                conn.disconnect()
             log_operation(name, "save")
             print(f"[OK] {name}: config saved")
             print(output)
-        except Exception as e:
+        except ClanetError as e:
             print(f"[FAIL] {name}: {e}")
+        except Exception as e:
+            print(f"[FAIL] {name}: unexpected error — {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -702,13 +734,17 @@ def cmd_commit(args):
 
         try:
             conn = connect(dev)
-            output = conn.commit()
-            conn.disconnect()
+            try:
+                output = conn.commit()
+            finally:
+                conn.disconnect()
             log_operation(name, "commit")
             print(f"[OK] {name}: committed")
             print(output)
-        except Exception as e:
+        except ClanetError as e:
             print(f"[FAIL] {name}: {e}")
+        except Exception as e:
+            print(f"[FAIL] {name}: unexpected error — {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -786,6 +822,22 @@ def _filter_rules_by_profile(rules: list[dict], profile: str) -> list[dict]:
     return [r for r in rules if r.get("_category") in allowed]
 
 
+def _safe_regex(pattern: str, text: str, flags: int = 0):
+    """Compile and search regex, raising ConfigError on invalid pattern."""
+    try:
+        return re.search(pattern, text, flags)
+    except re.error as e:
+        raise ConfigError(f"invalid regex in policy rule: '{pattern}' — {e}")
+
+
+def _safe_finditer(pattern: str, text: str, flags: int = 0):
+    """Compile and finditer regex, raising ConfigError on invalid pattern."""
+    try:
+        return list(re.finditer(pattern, text, flags))
+    except re.error as e:
+        raise ConfigError(f"invalid regex in policy rule: '{pattern}' — {e}")
+
+
 def _evaluate_rule(rule: dict, running_config: str) -> tuple[str, str]:
     """Evaluate a single policy rule against running-config.
 
@@ -799,7 +851,7 @@ def _evaluate_rule(rule: dict, running_config: str) -> tuple[str, str]:
     # recommend: advisory check → WARN if not found
     recommend = rule.get("recommend")
     if recommend and not scope:
-        if re.search(recommend, running_config):
+        if _safe_regex(recommend, running_config):
             return "PASS", f"recommend pattern '{recommend}' found"
         return "WARN", f"recommend pattern '{recommend}' not found"
 
@@ -807,13 +859,13 @@ def _evaluate_rule(rule: dict, running_config: str) -> tuple[str, str]:
     pattern_deny = rule.get("pattern_deny")
     if pattern_deny:
         pattern_allow = rule.get("pattern_allow")
-        deny_matches = list(re.finditer(pattern_deny, running_config, re.MULTILINE))
+        deny_matches = _safe_finditer(pattern_deny, running_config, re.MULTILINE)
         if deny_matches:
             # Check if all deny matches are covered by allow exceptions
             violations = []
             for m in deny_matches:
                 matched_line = m.group(0)
-                if pattern_allow and re.search(pattern_allow, matched_line):
+                if pattern_allow and _safe_regex(pattern_allow, matched_line):
                     continue  # allowed exception
                 violations.append(matched_line.strip())
             if violations:
@@ -824,7 +876,7 @@ def _evaluate_rule(rule: dict, running_config: str) -> tuple[str, str]:
     # require_in_running: pattern must exist in running-config
     require_in_running = rule.get("require_in_running")
     if require_in_running:
-        if re.search(require_in_running, running_config):
+        if _safe_regex(require_in_running, running_config):
             return "PASS", f"pattern '{require_in_running}' found"
         return "FAIL", f"pattern '{require_in_running}' not found in running-config"
 
@@ -834,17 +886,17 @@ def _evaluate_rule(rule: dict, running_config: str) -> tuple[str, str]:
     if require and require_on:
         # Extract section starting with require_on
         section_pattern = rf"^{require_on}.*?(?=^\S|\Z)"
-        section_match = re.search(section_pattern, running_config, re.MULTILINE | re.DOTALL)
+        section_match = _safe_regex(section_pattern, running_config, re.MULTILINE | re.DOTALL)
         if section_match:
             section_text = section_match.group(0)
-            if re.search(require, section_text):
+            if _safe_regex(require, section_text):
                 return "PASS", f"'{require}' found in '{require_on}' section"
             return "FAIL", f"'{require}' not found in '{require_on}' section"
         return "FAIL", f"section '{require_on}' not found in running-config"
 
     # require (global, without require_on)
     if require:
-        if re.search(require, running_config):
+        if _safe_regex(require, running_config):
             return "PASS", f"pattern '{require}' found"
         return "FAIL", f"pattern '{require}' not found in running-config"
 
@@ -866,6 +918,10 @@ def _load_policy(args) -> dict | None:
     try:
         with open(policy_path) as f:
             policy = yaml.safe_load(f)
+        if not isinstance(policy, dict):
+            raise ConfigError(
+                f"invalid policy format in {policy_path}: must be a YAML mapping"
+            )
         print(f"Policy: {policy_path}")
         return policy
     except FileNotFoundError:

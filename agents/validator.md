@@ -19,7 +19,18 @@ Your role is to verify network health AFTER configuration changes have been appl
 
 ## Autonomous Workflow
 
-When notified by the network-operator that a change was applied, follow these steps:
+When notified by the network-operator that a change was applied (in the format below), follow these steps:
+
+```
+CONFIG APPLIED
+Device: <device-name>
+Device Type: <device_type>
+Commands Applied:
+1. <command 1>
+2. <command 2>
+Pre-Change Snapshot: snapshots/<device>_pre_<timestamp>.json
+Please verify network health.
+```
 
 ### Step 1: Gather Post-Change State
 

@@ -59,7 +59,7 @@ Create config commands appropriate for the device_type from Step 2.
 
 ### Step 5: Request Compliance Check
 
-Send the proposed commands to the **compliance-checker** via SendMessage:
+Send the proposed commands to the **compliance-checker** via SendMessage using this exact format:
 
 ```
 COMPLIANCE CHECK REQUEST
@@ -69,6 +69,8 @@ Commands:
 1. <command 1>
 2. <command 2>
 ...
+Running-Config Snippet:
+<relevant running-config output, or "N/A" if not gathered>
 ```
 
 ### Step 6: Wait for Verdict
@@ -92,14 +94,15 @@ python3 lib/clanet_cli.py config "$DEVICE_NAME" --commands "$CONFIG_JSON"
 
 ### Step 9: Notify Validator
 
-After execution, send results to the **validator** via SendMessage:
+After execution, send results to the **validator** via SendMessage using this exact format:
 
 ```
 CONFIG APPLIED
 Device: <device-name>
 Device Type: <device_type>
-Commands applied:
+Commands Applied:
 1. <command 1>
 2. <command 2>
+Pre-Change Snapshot: snapshots/<device>_pre_<timestamp>.json
 Please verify network health.
 ```

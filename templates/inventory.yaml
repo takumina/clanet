@@ -7,34 +7,34 @@
 #   and 50+ more: https://github.com/ktbyers/netmiko/blob/develop/PLATFORMS.md
 #
 # Password management:
-#   Option 1: Direct (for testing only)
-#     password: mypassword
-#   Option 2: Environment variable (recommended)
+#   Option 1: Environment variable (recommended)
 #     password: ${NET_PASSWORD}
 #     Then: export NET_PASSWORD='your-secure-password'
+#   Option 2: Direct (for testing only)
+#     password: mypassword
 
 devices:
   router01:
     host: 192.168.1.1
     device_type: cisco_ios
     username: admin
-    password: CHANGE_ME
+    password: ${NET_PASSWORD}
     port: 22
 
   switch01:
     host: 192.168.1.2
     device_type: cisco_ios
     username: admin
-    password: CHANGE_ME
+    password: ${NET_PASSWORD}
 
   juniper01:
     host: 192.168.1.3
     device_type: juniper_junos
     username: root
-    password: CHANGE_ME
+    password: ${NET_PASSWORD}
 
   arista01:
     host: 192.168.1.4
     device_type: arista_eos
     username: admin
-    password: CHANGE_ME
+    password: ${NET_PASSWORD}

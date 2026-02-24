@@ -123,7 +123,7 @@ pip install ruff
 ruff check lib/ tests/
 ```
 
-Configuration is in `pyproject.toml`. CI runs ruff automatically on push/PR.
+Configuration is in `pyproject.toml`. No CI is currently configured. Run linting locally before committing.
 
 Tests are fully offline — no network devices needed. They use fixtures, monkeypatching, and `tmp_path` to test inventory loading, argument parsing, policy evaluation, artifact management, and more.
 

@@ -36,10 +36,24 @@ If `constraints` is defined, add them to the policy check — proposed commands 
 
 ### Step 3: Parse the Request
 
+The request from network-operator follows this format:
+
+```
+COMPLIANCE CHECK REQUEST
+Device: <device-name>
+Device Type: <device_type>
+Commands:
+1. <command 1>
+2. <command 2>
+...
+Running-Config Snippet:
+<running-config output or "N/A">
+```
+
 Extract from the message:
 - **Device name** and **device_type**
 - **Proposed config commands** (numbered list)
-- **Running-config snippet** (if provided by the operator)
+- **Running-config snippet** (if provided — needed for `require_in_running` rules)
 
 ### Step 4: Check Each Command Against All Rules
 

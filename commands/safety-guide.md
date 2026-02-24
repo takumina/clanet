@@ -122,16 +122,33 @@ Post-Change Verification:
 | Removing the only route to this device | WARN | "No alternate path exists. Access may be lost." |
 | `no router ospf/bgp` (management relies on it) | WARN | "Routing protocol removal may affect reachability." |
 
+### Detection Patterns by Platform
+
+Check every proposed command against these regex patterns. If any match → **BLOCK**.
+
+| Platform | Pattern (regex) | What it catches |
+|----------|----------------|-----------------|
+| `cisco_ios` | `interface\s+(Management\|Mgmt\|GigabitEthernet0/0)` + `(shutdown\|no ip address)` | Disabling management interface |
+| `cisco_ios` | `no\s+ip\s+route\s+0\.0\.0\.0` (when only default route exists) | Removing only path to device |
+| `cisco_ios` | `access-list.*deny.*<mgmt-source-ip>` | Blocking current SSH source in VTY ACL |
+| `cisco_ios` | `line\s+vty.*\n.*access-class.*` (changed ACL) | Modifying VTY access control |
+| `cisco_xr` | `interface\s+MgmtEth` + `(shutdown\|no ipv4 address)` | Disabling XR management interface |
+| `cisco_xr` | `no\s+router\s+(ospf\|bgp\|static)` (management depends on it) | Removing management routing |
+| `cisco_nxos` | `interface\s+mgmt0` + `(shutdown\|no ip address)` | Disabling NX-OS management interface |
+| `juniper_junos` | `delete\s+interfaces\s+(em0\|fxp0\|me0\|irb)` | Deleting Junos management interface |
+| `juniper_junos` | `delete\s+routing-options\s+static` (management route) | Removing management route |
+| `arista_eos` | `interface\s+Management1` + `(shutdown\|no ip address)` | Disabling EOS management interface |
+
 ### Detection Logic
 
 Before executing config commands, gather:
-1. Current management interface: `show ip interface brief` → find MgmtEth
+1. Current management interface: `show ip interface brief` → find MgmtEth / Management / mgmt0
 2. Current SSH source IP: shown in connection info
 3. Current VTY ACL: `show running-config | section vty`
 
 Then check if any proposed command would:
-- Modify the management interface
-- Change VTY access rules
+- Modify the management interface (match interface name patterns above)
+- Change VTY access rules to exclude the current source IP
 - Remove routing that reaches the management subnet
 
 If detected → **BLOCK** with clear explanation and do NOT proceed.

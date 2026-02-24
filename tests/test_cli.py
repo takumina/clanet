@@ -10,6 +10,7 @@ Tests cover:
 - Operation logging
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -440,18 +441,18 @@ class TestConnect:
             return original_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", mock_import)
-        with pytest.raises(clanet_cli.DeviceConnectionError):
+        with pytest.raises(clanet_cli.ConfigError):
             clanet_cli.connect({"device_type": "cisco_ios", "host": "1.1.1.1",
                                 "username": "admin", "password": "admin"})
 
     def test_connect_missing_fields(self):
-        """connect() should raise DeviceConnectionError when required fields are missing."""
-        with pytest.raises(clanet_cli.DeviceConnectionError):
+        """connect() should raise ConfigError when required fields are missing."""
+        with pytest.raises(clanet_cli.ConfigError):
             clanet_cli.connect({"host": "1.1.1.1"})
 
     def test_connect_missing_password(self):
-        """connect() should raise DeviceConnectionError when password is missing."""
-        with pytest.raises(clanet_cli.DeviceConnectionError):
+        """connect() should raise ConfigError when password is missing."""
+        with pytest.raises(clanet_cli.ConfigError):
             clanet_cli.connect({"device_type": "cisco_ios", "host": "1.1.1.1",
                                 "username": "admin"})
 
@@ -1098,6 +1099,8 @@ class TestSubcommandIntegration:
         """Session status should check TCP port."""
         mock_socket = MagicMock()
         mock_socket.connect_ex.return_value = 0
+        mock_socket.__enter__ = MagicMock(return_value=mock_socket)
+        mock_socket.__exit__ = MagicMock(return_value=False)
 
         def mock_socket_cls(*args, **kwargs):
             return mock_socket
@@ -1114,6 +1117,8 @@ class TestSubcommandIntegration:
         """Session should report closed port."""
         mock_socket = MagicMock()
         mock_socket.connect_ex.return_value = 1
+        mock_socket.__enter__ = MagicMock(return_value=mock_socket)
+        mock_socket.__exit__ = MagicMock(return_value=False)
 
         def mock_socket_cls(*args, **kwargs):
             return mock_socket
@@ -1385,3 +1390,104 @@ class TestSnapshotRedaction:
         assert "045802150C2E" not in captured.out
         assert "public" not in captured.out
         assert "***" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Validate JSON Commands
+# ---------------------------------------------------------------------------
+
+
+class TestValidateJsonCommands:
+    """Tests for _validate_json_commands input validation."""
+
+    def test_valid_json_list(self):
+        result = clanet_cli._validate_json_commands('["cmd1", "cmd2"]')
+        assert result == ["cmd1", "cmd2"]
+
+    def test_json_dict_rejected(self):
+        with pytest.raises(clanet_cli.ConfigError, match="JSON array"):
+            clanet_cli._validate_json_commands('{"key": "value"}')
+
+    def test_empty_list_rejected(self):
+        with pytest.raises(clanet_cli.ConfigError, match="empty"):
+            clanet_cli._validate_json_commands('[]')
+
+    def test_non_string_elements_rejected(self):
+        with pytest.raises(clanet_cli.ConfigError, match="string"):
+            clanet_cli._validate_json_commands('[1, 2, 3]')
+
+    def test_invalid_json_rejected(self):
+        with pytest.raises(clanet_cli.ConfigError, match="not valid JSON"):
+            clanet_cli._validate_json_commands('not json')
+
+
+# ---------------------------------------------------------------------------
+# Inventory YAML Validation
+# ---------------------------------------------------------------------------
+
+
+class TestInventoryValidation:
+    """Tests that load_inventory rejects malformed YAML structures."""
+
+    def test_devices_not_dict_rejected(self, tmp_path, monkeypatch):
+        inv_file = tmp_path / "inventory.yaml"
+        inv_file.write_text("devices: not_a_dict\n")
+        monkeypatch.setattr(clanet_cli, "INVENTORY_PATHS", [str(inv_file)])
+        monkeypatch.setattr(clanet_cli, "_config", {"inventory": None})
+        with pytest.raises(clanet_cli.ConfigError, match="YAML mapping"):
+            clanet_cli.load_inventory()
+
+    def test_null_yaml_rejected(self, tmp_path, monkeypatch):
+        inv_file = tmp_path / "inventory.yaml"
+        inv_file.write_text("null\n")
+        monkeypatch.setattr(clanet_cli, "INVENTORY_PATHS", [str(inv_file)])
+        monkeypatch.setattr(clanet_cli, "_config", {"inventory": None})
+        with pytest.raises(clanet_cli.ConfigError, match="YAML mapping"):
+            clanet_cli.load_inventory()
+
+
+# ---------------------------------------------------------------------------
+# Policy YAML Validation
+# ---------------------------------------------------------------------------
+
+
+class TestPolicyValidation:
+    """Tests that _load_policy rejects malformed policy YAML."""
+
+    def test_null_policy_rejected(self, tmp_path, monkeypatch):
+        policy_file = tmp_path / "policy.yaml"
+        policy_file.write_text("null\n")
+        args = argparse.Namespace(policy=str(policy_file))
+        with pytest.raises(clanet_cli.ConfigError, match="YAML mapping"):
+            clanet_cli._load_policy(args)
+
+    def test_string_policy_rejected(self, tmp_path, monkeypatch):
+        policy_file = tmp_path / "policy.yaml"
+        policy_file.write_text('"just a string"\n')
+        args = argparse.Namespace(policy=str(policy_file))
+        with pytest.raises(clanet_cli.ConfigError, match="YAML mapping"):
+            clanet_cli._load_policy(args)
+
+
+# ---------------------------------------------------------------------------
+# Invalid Regex Handling
+# ---------------------------------------------------------------------------
+
+
+class TestInvalidRegexHandling:
+    """Tests that invalid regex in policy rules raises ConfigError."""
+
+    def test_invalid_pattern_deny(self):
+        rule = {"pattern_deny": "([invalid"}
+        with pytest.raises(clanet_cli.ConfigError, match="invalid regex"):
+            clanet_cli._evaluate_rule(rule, "some config text")
+
+    def test_invalid_require_in_running(self):
+        rule = {"require_in_running": "([invalid"}
+        with pytest.raises(clanet_cli.ConfigError, match="invalid regex"):
+            clanet_cli._evaluate_rule(rule, "some config text")
+
+    def test_invalid_recommend(self):
+        rule = {"recommend": "([invalid"}
+        with pytest.raises(clanet_cli.ConfigError, match="invalid regex"):
+            clanet_cli._evaluate_rule(rule, "some config text")
