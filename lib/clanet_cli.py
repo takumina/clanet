@@ -996,7 +996,7 @@ def cmd_context(args):
     ctx = _load_context()
     if ctx is None:
         print("No context file found.")
-        print("Create one: cp examples/context.yaml context.yaml")
+        print("Create one: cp context.yaml.example context.yaml")
         return
 
     for key in ("topology", "symptoms", "constraints", "success_criteria"):

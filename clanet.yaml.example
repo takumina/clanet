@@ -1,6 +1,6 @@
 # .clanet.yaml - clanet plugin configuration
 # Copy this file to the project root or home directory:
-#   cp examples/clanet.yaml .clanet.yaml
+#   cp clanet.yaml.example .clanet.yaml
 #
 # Project-level config takes priority over home-level config.
 # Search order: ./.clanet.yaml → ~/.clanet.yaml → built-in defaults

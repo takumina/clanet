@@ -47,10 +47,9 @@ clanet/
 ├── policies/
 │   ├── example.yaml        # Compliance policy template (rules are commented out)
 │   └── health.yaml         # Health check & snapshot commands (per-vendor)
-├── examples/
-│   ├── inventory.yaml      # Device inventory template
-│   ├── context.yaml        # Operation context template
-│   └── clanet.yaml         # Plugin config (.clanet.yaml) template
+├── inventory.yaml.example   # Device inventory template
+├── context.yaml.example     # Operation context template
+├── clanet.yaml.example      # Plugin config (.clanet.yaml) template
 ├── requirements.txt        # Runtime dependencies (netmiko, pyyaml)
 ├── requirements-dev.txt    # Dev dependencies (adds pytest)
 ├── .gitignore

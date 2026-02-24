@@ -27,12 +27,34 @@
 
 # 3. Python 依存パッケージをインストール
 pip install netmiko pyyaml
-
-# 4. インベントリを作成
-cp examples/inventory.yaml ~/.net-inventory.yaml
-# ~/.net-inventory.yaml を編集してデバイス情報を入力
-# ヒント: パスワードには ${ENV_VAR} 形式を推奨（セキュリティ項目を参照）
 ```
+
+#### 4. インベントリファイルを作成
+
+マーケットプレイスからインストールした場合、テンプレートファイルは手元にありません。
+以下をそのままターミナルにコピペして実行してください:
+
+```bash
+cat <<'EOF' > ~/.net-inventory.yaml
+# clanet インベントリ — host/username/password を自分の環境に書き換えてください
+# device_type 一覧: https://github.com/ktbyers/netmiko/blob/develop/PLATFORMS.md
+devices:
+  router01:
+    host: 192.168.1.1
+    device_type: cisco_ios
+    username: admin
+    password: CHANGE_ME
+    port: 22
+EOF
+```
+
+ファイルが作成されたら、自分の環境に合わせて編集します:
+
+```bash
+nano ~/.net-inventory.yaml
+```
+
+> **セキュリティ推奨**: パスワードは `${ENV_VAR}` 形式で環境変数から読み込めます。詳しくは「[インベントリ形式](#インベントリ形式)」を参照してください。
 
 ### 手動セットアップ
 
@@ -45,7 +67,7 @@ cd clanet
 pip install -r requirements.txt
 
 # 2. インベントリを作成
-cp examples/inventory.yaml inventory.yaml
+cp inventory.yaml.example inventory.yaml
 # inventory.yaml を編集してデバイス情報を入力
 ```
 
@@ -163,7 +185,7 @@ Claude がデバイスの状態を読み取り、根本原因を診断し、修�
 複数ステップの作業では、事前にコンテキストを定義できます:
 
 ```bash
-cp examples/context.yaml context.yaml
+cp context.yaml.example context.yaml
 # context.yaml を編集
 ```
 
@@ -272,7 +294,7 @@ auto_backup: true
 | `health_file` | ヘルスチェック / スナップショットコマンドの YAML パス | `policies/health.yaml` |
 | `context_file` | 運用コンテキスト YAML のパス | `./context.yaml` |
 
-詳細は `examples/clanet.yaml` を参照してください。
+詳細は `clanet.yaml.example` を参照してください。
 
 ### 運用コンテキスト
 
@@ -280,7 +302,7 @@ auto_backup: true
 定義すると、`/clanet:validate`、`/clanet:why`、`/clanet:check`、`/clanet:team` が自動的に参照します。
 
 ```bash
-cp examples/context.yaml context.yaml
+cp context.yaml.example context.yaml
 # context.yaml を編集
 python3 lib/clanet_cli.py context   # 読み込み確認
 ```
@@ -391,10 +413,9 @@ clanet/
 ├── policies/
 │   ├── example.yaml              # コンプライアンスルール（カスタマイズ可）
 │   └── health.yaml               # ヘルスチェックコマンド（カスタマイズ可）
-├── examples/
-│   ├── inventory.yaml            # インベントリテンプレート
-│   ├── context.yaml              # 運用コンテキストテンプレート
-│   └── clanet.yaml               # 設定テンプレート
+├── inventory.yaml.example         # インベントリテンプレート
+├── context.yaml.example           # 運用コンテキストテンプレート
+├── clanet.yaml.example            # 設定テンプレート
 ```
 
 全 16 コマンドと 3 エージェントが `lib/clanet_cli.py` を共有 — 接続・パースロジックの重複はゼロです。
@@ -424,7 +445,7 @@ clanet は Claude Code プラグインです。プロンプト設計とツール
 
 | 問題 | 原因 | 解決方法 |
 |-----|------|---------|
-| `ERROR: inventory.yaml not found` | インベントリファイルが見つからない | `cp examples/inventory.yaml inventory.yaml` して編集 |
+| `ERROR: inventory.yaml not found` | インベントリファイルが見つからない | `cp inventory.yaml.example inventory.yaml` して編集 |
 | `ERROR: Netmiko is not installed` | Python 依存パッケージ不足 | `pip install netmiko` |
 | `ERROR: device 'xxx' not found` | デバイス名がインベントリにない | `inventory.yaml` のデバイス名を確認。正確な名前か IP を使用 |
 | `SSH connection timeout` | デバイスに到達できない | inventory のホスト/ポートを確認。`ssh user@host -p port` でテスト |

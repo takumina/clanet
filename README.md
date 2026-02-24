@@ -27,12 +27,33 @@ Network automation plugin for Claude Code. Powered by [Netmiko](https://github.c
 
 # 3. Install Python dependencies
 pip install netmiko pyyaml
-
-# 4. Create your inventory
-cp examples/inventory.yaml ~/.net-inventory.yaml
-# Edit ~/.net-inventory.yaml with your device info
-# Tip: Use ${ENV_VAR} syntax for passwords (see Security Considerations)
 ```
+
+#### 4. Create your inventory file
+
+Marketplace installs don't include template files locally. Paste the following into your terminal to create the inventory file:
+
+```bash
+cat <<'EOF' > ~/.net-inventory.yaml
+# clanet inventory - edit host/username/password for your devices
+# device_type reference: https://github.com/ktbyers/netmiko/blob/develop/PLATFORMS.md
+devices:
+  router01:
+    host: 192.168.1.1
+    device_type: cisco_ios
+    username: admin
+    password: CHANGE_ME
+    port: 22
+EOF
+```
+
+Then edit `~/.net-inventory.yaml` with your actual device info:
+
+```bash
+nano ~/.net-inventory.yaml
+```
+
+> **Security tip**: Use `${ENV_VAR}` syntax for passwords instead of plain text. See [Security Considerations](#security-considerations).
 
 ### Manual setup
 
@@ -45,7 +66,7 @@ cd clanet
 pip install -r requirements.txt
 
 # 2. Create your inventory
-cp examples/inventory.yaml inventory.yaml
+cp inventory.yaml.example inventory.yaml
 # Edit inventory.yaml with your device info
 ```
 
@@ -163,7 +184,7 @@ Claude reads device state, diagnoses the root cause, and suggests a fix.
 For multi-step operations, define context upfront:
 
 ```bash
-cp examples/context.yaml context.yaml
+cp context.yaml.example context.yaml
 # Edit context.yaml with your topology, constraints, and success criteria
 ```
 
@@ -272,7 +293,7 @@ auto_backup: true
 | `health_file` | Path to health check / snapshot commands YAML | `policies/health.yaml` |
 | `context_file` | Path to operation context YAML | `./context.yaml` |
 
-See `examples/clanet.yaml` for a full template.
+See `clanet.yaml.example` for a full template.
 
 ### Operation Context
 
@@ -280,7 +301,7 @@ Define task-specific network topology, symptoms, constraints, and success criter
 When present, `/clanet:validate`, `/clanet:why`, `/clanet:check`, and `/clanet:team` automatically reference it.
 
 ```bash
-cp examples/context.yaml context.yaml
+cp context.yaml.example context.yaml
 # Edit context.yaml for your task
 python3 lib/clanet_cli.py context   # Verify loading
 ```
@@ -377,11 +398,10 @@ clanet-plugin/
 ├── policies/
 │   ├── example.yaml              # Compliance rules (customizable)
 │   └── health.yaml               # Health check & snapshot commands
-├── examples/
-│   ├── inventory.yaml            # Device inventory template
-│   ├── context.yaml              # Operation context template
-│   └── clanet.yaml               # Plugin config template
-└── requirements.txt              # Python dependencies
+├── inventory.yaml.example         # Device inventory template
+├── context.yaml.example           # Operation context template
+├── clanet.yaml.example            # Plugin config template
+└── requirements.txt               # Python dependencies
 ```
 
 All 16 commands and 3 agents share `lib/clanet_cli.py` — no duplicated connection or parsing logic.
@@ -411,7 +431,7 @@ clanet is a Claude Code plugin — it structures prompts and orchestrates tools 
 
 | Problem | Cause | Solution |
 |---------|-------|----------|
-| `ERROR: inventory.yaml not found` | No inventory file in search paths | `cp examples/inventory.yaml inventory.yaml` and edit |
+| `ERROR: inventory.yaml not found` | No inventory file in search paths | `cp inventory.yaml.example inventory.yaml` and edit |
 | `ERROR: Netmiko is not installed` | Missing Python dependency | `pip install netmiko` |
 | `ERROR: device 'xxx' not found` | Device name not in inventory | Check `inventory.yaml` device names; use exact name or IP |
 | `SSH connection timeout` | Device unreachable or wrong port | Verify host/port in inventory; test with `ssh user@host -p port` |
