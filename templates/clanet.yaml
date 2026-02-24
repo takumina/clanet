@@ -1,6 +1,6 @@
 # .clanet.yaml - clanet plugin configuration
 # Copy this file to the project root or home directory:
-#   cp clanet.yaml.example .clanet.yaml
+#   cp templates/clanet.yaml .clanet.yaml
 #
 # Project-level config takes priority over home-level config.
 # Search order: ./.clanet.yaml → ~/.clanet.yaml → built-in defaults
@@ -8,11 +8,11 @@
 # Custom inventory file path (default: ./inventory.yaml or ~/.net-inventory.yaml)
 # inventory: ./my-inventory.yaml
 
-# Custom compliance policy file (default: policies/example.yaml)
-# policy_file: ./policies/my-company-policy.yaml
+# Custom compliance policy file (default: templates/policy.yaml)
+# policy_file: ./my-policy.yaml
 
-# Custom health check / snapshot commands (default: policies/health.yaml)
-# health_file: ./policies/my-health.yaml
+# Custom health check / snapshot commands (default: templates/health.yaml)
+# health_file: ./my-health.yaml
 
 # Default audit profile: basic | security | full (default: basic)
 # default_profile: security

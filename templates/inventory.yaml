@@ -1,6 +1,6 @@
 # Network Device Inventory
 # Copy this file and edit with your device info:
-#   cp inventory.yaml.example inventory.yaml
+#   cp templates/inventory.yaml inventory.yaml
 #
 # Supported device_type values (Netmiko):
 #   cisco_ios, cisco_xr, cisco_nxos, juniper_junos, arista_eos,

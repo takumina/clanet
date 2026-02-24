@@ -15,43 +15,45 @@ clanet is a **Claude Code plugin** for network automation, powered by [Netmiko](
 
 ```
 clanet/
+├── .claude/
+│   └── CLAUDE.md              # Developer guide (hidden from GitHub root)
 ├── .claude-plugin/
-│   └── plugin.json         # Claude Code plugin manifest
-├── commands/               # 16 slash command definitions (Markdown)
-│   ├── clanet.md           # /clanet — connect and show version
-│   ├── cmd.md              # /clanet:cmd — execute show commands
-│   ├── config.md           # /clanet:config — apply config (with safety)
-│   ├── deploy.md           # /clanet:deploy — deploy config from file
-│   ├── interactive.md      # /clanet:interactive — interactive commands
-│   ├── check.md            # /clanet:check — health check
-│   ├── backup.md           # /clanet:backup — backup running-config
-│   ├── session.md          # /clanet:session — connectivity check
-│   ├── mode.md             # /clanet:mode — enable/config mode switching
-│   ├── save.md             # /clanet:save — write memory
-│   ├── commit.md           # /clanet:commit — commit (IOS-XR/Junos)
-│   ├── validate.md         # /clanet:validate — pre/post snapshot diff
-│   ├── why.md              # /clanet:why — network troubleshooting
-│   ├── audit.md            # /clanet:audit — compliance audit
-│   ├── team.md             # /clanet:team — multi-agent team change
-│   └── safety-guide.md     # [internal] shared safety framework
-├── agents/                 # 3 specialized agent definitions
+│   └── plugin.json            # Claude Code plugin manifest
+├── commands/                  # 16 slash command definitions (Markdown)
+│   ├── clanet.md              # /clanet — connect and show version
+│   ├── cmd.md                 # /clanet:cmd — execute show commands
+│   ├── config.md              # /clanet:config — apply config (with safety)
+│   ├── deploy.md              # /clanet:deploy — deploy config from file
+│   ├── interactive.md         # /clanet:interactive — interactive commands
+│   ├── check.md               # /clanet:check — health check
+│   ├── backup.md              # /clanet:backup — backup running-config
+│   ├── session.md             # /clanet:session — connectivity check
+│   ├── mode.md                # /clanet:mode — enable/config mode switching
+│   ├── save.md                # /clanet:save — write memory
+│   ├── commit.md              # /clanet:commit — commit (IOS-XR/Junos)
+│   ├── validate.md            # /clanet:validate — pre/post snapshot diff
+│   ├── why.md                 # /clanet:why — network troubleshooting
+│   ├── audit.md               # /clanet:audit — compliance audit
+│   ├── team.md                # /clanet:team — multi-agent team change
+│   └── safety-guide.md        # [internal] shared safety framework
+├── agents/                    # 3 specialized agent definitions
 │   ├── compliance-checker.md  # Policy validation (read-only)
 │   ├── network-operator.md    # Config generation + execution
 │   └── validator.md           # Post-change health verification
 ├── skills/
-│   └── team/SKILL.md       # Multi-agent orchestration skill
+│   └── team/SKILL.md          # Multi-agent orchestration skill
 ├── lib/
-│   └── clanet_cli.py       # Core CLI engine (single source of truth)
+│   └── clanet_cli.py          # Core CLI engine (single source of truth)
+├── templates/                 # User-facing config templates (copy & customize)
+│   ├── inventory.yaml         # Device inventory template
+│   ├── context.yaml           # Operation context template
+│   ├── clanet.yaml            # Plugin config (.clanet.yaml) template
+│   ├── policy.yaml            # Compliance policy rules template
+│   └── health.yaml            # Health check & snapshot commands (per-vendor)
 ├── tests/
-│   └── test_cli.py         # Unit tests (pytest, no network required)
-├── policies/
-│   ├── example.yaml        # Compliance policy template (rules are commented out)
-│   └── health.yaml         # Health check & snapshot commands (per-vendor)
-├── inventory.yaml.example   # Device inventory template
-├── context.yaml.example     # Operation context template
-├── clanet.yaml.example      # Plugin config (.clanet.yaml) template
-├── requirements.txt        # Runtime dependencies (netmiko, pyyaml)
-├── requirements-dev.txt    # Dev dependencies (adds pytest)
+│   └── test_cli.py            # Unit tests (pytest, no network required)
+├── requirements.txt           # Runtime dependencies (netmiko, pyyaml)
+├── requirements-dev.txt       # Dev dependencies (adds pytest)
 ├── .gitignore
 ├── LICENSE
 └── README.md
@@ -79,7 +81,7 @@ All config-changing commands follow the **"Show, Explain, Confirm, Verify"** pat
 
 ### External-Only Policy Rules
 
-Compliance rules live entirely in YAML files (`policies/example.yaml`). The audit engine (`_evaluate_rule`) supports these rule types:
+Compliance rules live entirely in YAML files (`templates/policy.yaml`). The audit engine (`_evaluate_rule`) supports these rule types:
 - `pattern_deny` / `pattern_allow` — regex deny with optional exceptions
 - `require` / `require_on` — required pattern, optionally scoped to a config section
 - `require_in_running` — must exist in running-config
@@ -125,7 +127,7 @@ Configuration is in `pyproject.toml`. CI runs ruff automatically on push/PR.
 
 Tests are fully offline — no network devices needed. They use fixtures, monkeypatching, and `tmp_path` to test inventory loading, argument parsing, policy evaluation, artifact management, and more.
 
-All tests should pass in a clean checkout. `policies/health.yaml` ships with the repo and defines per-vendor health check and snapshot commands.
+All tests should pass in a clean checkout. `templates/health.yaml` ships with the repo and defines per-vendor health check and snapshot commands.
 
 ### Adding a New Slash Command
 
@@ -169,8 +171,8 @@ All tests should pass in a clean checkout. `policies/health.yaml` ships with the
 |--------|-------------|
 | Plugin config | `./.clanet.yaml` → `~/.clanet.yaml` → built-in defaults |
 | Inventory | `inventory` key in config → `./inventory.yaml` → `~/.net-inventory.yaml` |
-| Policy | `--policy` flag → `policy_file` in config → `policies/example.yaml` |
-| Health checks | `health_file` in config → `policies/health.yaml` |
+| Policy | `--policy` flag → `policy_file` in config → `templates/policy.yaml` |
+| Health checks | `health_file` in config → `templates/health.yaml` |
 | Context | `context_file` in config → `./context.yaml` (optional) |
 | Timeouts | `read_timeout` / `read_timeout_long` in config → defaults (30s / 60s) |
 

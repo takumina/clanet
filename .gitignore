@@ -28,10 +28,6 @@ context.yaml
 # pytest
 .pytest_cache/
 
-# Local reports (not tracked)
-EVALUATION.md
-PLAN.md
-
 # OS
 .DS_Store
 Thumbs.db

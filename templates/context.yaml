@@ -4,7 +4,7 @@
 # Copy this file to context.yaml and edit it for your current task.
 #
 # Usage:
-#   cp context.yaml.example context.yaml
+#   cp templates/context.yaml context.yaml
 #   # Edit context.yaml for your task
 #   python3 lib/clanet_cli.py context   # Verify loading
 #

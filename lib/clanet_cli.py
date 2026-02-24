@@ -102,8 +102,8 @@ DIRS = {
 
 # Default file paths (used when .clanet.yaml does not specify overrides)
 DEFAULT_SSH_PORT = 22
-DEFAULT_HEALTH_PATH = "policies/health.yaml"
-DEFAULT_POLICY_PATH = "policies/example.yaml"
+DEFAULT_HEALTH_PATH = "templates/health.yaml"
+DEFAULT_POLICY_PATH = "templates/policy.yaml"
 LOG_FILENAME = "clanet_operations.log"
 
 # Standard timestamp formats
@@ -157,7 +157,7 @@ def get_config() -> dict:
 def _load_health_config() -> dict:
     """Load health check / snapshot command definitions from YAML.
 
-    Search order: health_file in .clanet.yaml → policies/health.yaml.
+    Search order: health_file in .clanet.yaml → templates/health.yaml.
     Returns dict with keys: health_commands, snapshot_commands, fallback.
     """
     config = get_config()
@@ -172,7 +172,7 @@ def _load_health_config() -> dict:
     except FileNotFoundError:
         raise ConfigError(
             f"health config not found: {health_path}"
-            " (create one: cp policies/health.yaml policies/my-health.yaml"
+            " (create one: cp templates/health.yaml my-health.yaml"
             " or specify health_file in .clanet.yaml)"
         )
 
@@ -887,7 +887,7 @@ def cmd_audit(args):
     if not policy:
         raise ConfigError(
             "No policy file found. Audit requires a policy YAML."
-            " (create one: cp policies/example.yaml policies/my-policy.yaml"
+            " (create one: cp templates/policy.yaml my-policy.yaml"
             " or specify: --policy path/to/policy.yaml)"
         )
 
@@ -996,7 +996,7 @@ def cmd_context(args):
     ctx = _load_context()
     if ctx is None:
         print("No context file found.")
-        print("Create one: cp context.yaml.example context.yaml")
+        print("Create one: cp templates/context.yaml context.yaml")
         return
 
     for key in ("topology", "symptoms", "constraints", "success_criteria"):

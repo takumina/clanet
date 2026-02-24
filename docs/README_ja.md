@@ -16,66 +16,36 @@
 
 ## インストール
 
-### マーケットプレイスから（推奨）
-
-**ステップ 1** — マーケットプレイスを追加
+**ステップ 1** — マーケットプレイスからプラグインをインストール
 
 ```bash
 /plugin marketplace add takumina/clanet-marketplace
-```
-
-**ステップ 2** — プラグインをインストール
-
-```bash
 /plugin install clanet@clanet-marketplace
 ```
 
-**ステップ 3** — Python 依存パッケージをインストール
+**ステップ 2** — リポジトリをクローンして依存パッケージをインストール
+
+クローンすると、テンプレートファイル・コンプライアンスポリシー・ヘルスチェック設定などが手元に揃います。マルチエージェントやカスタマイズ機能はこれらのファイルを参照します。
 
 ```bash
-pip install netmiko pyyaml
-```
-
-**ステップ 4** — インベントリファイルを作成
-
-マーケットプレイスからインストールした場合、テンプレートファイルは手元にありません。以下をそのままターミナルにコピペして実行してください:
-
-```bash
-cat <<'EOF' > ~/.net-inventory.yaml
-# clanet インベントリ — host/username/password を自分の環境に書き換えてください
-# device_type 一覧: https://github.com/ktbyers/netmiko/blob/develop/PLATFORMS.md
-devices:
-  router01:
-    host: 192.168.1.1
-    device_type: cisco_ios
-    username: admin
-    password: CHANGE_ME
-    port: 22
-EOF
-```
-
-ファイルが作成されたら、自分の環境に合わせて編集します:
-
-```bash
-nano ~/.net-inventory.yaml
-```
-
-> **セキュリティ推奨**: パスワードは `${ENV_VAR}` 形式で環境変数から読み込めます。詳しくは「[インベントリ形式](#インベントリ形式)」を参照してください。
-
-### 手動セットアップ
-
-```bash
-# 前提: Python 3.10+
-
-# 1. クローンして依存パッケージをインストール
 git clone https://github.com/takumina/clanet.git
 cd clanet
 pip install -r requirements.txt
-
-# 2. インベントリを作成
-cp inventory.yaml.example inventory.yaml
-# inventory.yaml を編集してデバイス情報を入力
 ```
+
+**ステップ 3** — インベントリを作成
+
+```bash
+cp templates/inventory.yaml inventory.yaml
+```
+
+`inventory.yaml` を開いて、自分のデバイス情報（host, username, password, device_type）を入力します:
+
+```bash
+nano inventory.yaml
+```
+
+> **セキュリティ推奨**: パスワードは `${ENV_VAR}` 形式で環境変数から読み込めます。詳しくは「[インベントリ形式](#インベントリ形式)」を参照してください。
 
 ## クイックスタート
 
@@ -191,7 +161,7 @@ Claude がデバイスの状態を読み取り、根本原因を診断し、修�
 複数ステップの作業では、事前にコンテキストを定義できます:
 
 ```bash
-cp context.yaml.example context.yaml
+cp templates/context.yaml context.yaml
 # context.yaml を編集
 ```
 
@@ -276,7 +246,7 @@ success_criteria:
 - **役割分離による安全性** — 各エージェントが実行できる操作を厳密に制限
 - **自律ワークフロー** — エージェント間は SendMessage で通信、手動の調整は不要
 
-コンプライアンスポリシーは `policies/example.yaml` で定義され、自由にカスタマイズできます。
+コンプライアンスポリシーは `templates/policy.yaml` で定義され、自由にカスタマイズできます。
 
 ## カスタマイズ
 
@@ -286,7 +256,7 @@ success_criteria:
 ```yaml
 # .clanet.yaml
 inventory: ./my-inventory.yaml
-policy_file: ./policies/my-company-policy.yaml
+policy_file: ./my-policy.yaml
 default_profile: security
 auto_backup: true
 ```
@@ -294,13 +264,13 @@ auto_backup: true
 | 設定項目 | 説明 | デフォルト |
 |---------|------|---------|
 | `inventory` | デバイスインベントリファイルのパス | `./inventory.yaml` |
-| `policy_file` | コンプライアンスポリシー YAML のパス | `policies/example.yaml` |
+| `policy_file` | コンプライアンスポリシー YAML のパス | `templates/policy.yaml` |
 | `default_profile` | デフォルトの監査プロファイル（`basic`/`security`/`full`） | `basic` |
 | `auto_backup` | コンフィグ変更前に自動バックアップ | `false` |
-| `health_file` | ヘルスチェック / スナップショットコマンドの YAML パス | `policies/health.yaml` |
+| `health_file` | ヘルスチェック / スナップショットコマンドの YAML パス | `templates/health.yaml` |
 | `context_file` | 運用コンテキスト YAML のパス | `./context.yaml` |
 
-詳細は `clanet.yaml.example` を参照してください。
+詳細は `templates/clanet.yaml` を参照してください。
 
 ### 運用コンテキスト
 
@@ -308,7 +278,7 @@ auto_backup: true
 定義すると、`/clanet:validate`、`/clanet:why`、`/clanet:check`、`/clanet:team` が自動的に参照します。
 
 ```bash
-cp context.yaml.example context.yaml
+cp templates/context.yaml context.yaml
 # context.yaml を編集
 python3 lib/clanet_cli.py context   # 読み込み確認
 ```
@@ -334,33 +304,33 @@ success_criteria:
 
 ### カスタムヘルスチェックコマンド
 
-`/clanet:check` と `/clanet:snapshot` で実行されるコマンドは `policies/health.yaml` で定義されています。
+`/clanet:check` と `/clanet:snapshot` で実行されるコマンドは `templates/health.yaml` で定義されています。
 コード変更なしで自由にカスタマイズできます（例: OSPF チェックの削除、MPLS チェックの追加）。
 
 ```bash
-cp policies/health.yaml policies/my-health.yaml
-# policies/my-health.yaml を編集
+cp templates/health.yaml my-health.yaml
+# my-health.yaml を編集
 ```
 
 `.clanet.yaml` で指定:
 
 ```yaml
-health_file: ./policies/my-health.yaml
+health_file: ./my-health.yaml
 ```
 
 ### カスタムコンプライアンスポリシー
 
-`policies/example.yaml` をコピーして独自ルールを追加:
+`templates/policy.yaml` をコピーして独自ルールを追加:
 
 ```bash
-cp policies/example.yaml policies/my-policy.yaml
-# policies/my-policy.yaml を編集
+cp templates/policy.yaml my-policy.yaml
+# my-policy.yaml を編集
 ```
 
 `.clanet.yaml` で指定:
 
 ```yaml
-policy_file: ./policies/my-policy.yaml
+policy_file: ./my-policy.yaml
 ```
 
 compliance-checker エージェントと `/clanet:audit` が自動的にカスタムポリシーを使用します。
@@ -416,12 +386,13 @@ clanet/
 ├── skills/team/SKILL.md          # マルチエージェントオーケストレーション
 ├── lib/clanet_cli.py             # 共通 CLI エンジン（単一ソースオブトゥルース）
 ├── tests/test_cli.py             # ユニットテスト（ネットワーク不要）
-├── policies/
-│   ├── example.yaml              # コンプライアンスルール（カスタマイズ可）
-│   └── health.yaml               # ヘルスチェックコマンド（カスタマイズ可）
-├── inventory.yaml.example         # インベントリテンプレート
-├── context.yaml.example           # 運用コンテキストテンプレート
-├── clanet.yaml.example            # 設定テンプレート
+├── templates/                    # ユーザーがカスタマイズする設定テンプレート
+│   ├── inventory.yaml            # デバイスインベントリ
+│   ├── context.yaml              # 運用コンテキスト
+│   ├── clanet.yaml               # プラグイン設定
+│   ├── policy.yaml               # コンプライアンスルール
+│   └── health.yaml               # ヘルスチェックコマンド
+└── requirements.txt              # Python 依存パッケージ
 ```
 
 全 16 コマンドと 3 エージェントが `lib/clanet_cli.py` を共有 — 接続・パースロジックの重複はゼロです。
@@ -451,7 +422,7 @@ clanet は Claude Code プラグインです。プロンプト設計とツール
 
 | 問題 | 原因 | 解決方法 |
 |-----|------|---------|
-| `ERROR: inventory.yaml not found` | インベントリファイルが見つからない | `cp inventory.yaml.example inventory.yaml` して編集 |
+| `ERROR: inventory.yaml not found` | インベントリファイルが見つからない | `cp templates/inventory.yaml inventory.yaml` して編集 |
 | `ERROR: Netmiko is not installed` | Python 依存パッケージ不足 | `pip install netmiko` |
 | `ERROR: device 'xxx' not found` | デバイス名がインベントリにない | `inventory.yaml` のデバイス名を確認。正確な名前か IP を使用 |
 | `SSH connection timeout` | デバイスに到達できない | inventory のホスト/ポートを確認。`ssh user@host -p port` でテスト |

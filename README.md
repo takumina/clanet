@@ -16,66 +16,36 @@ Network automation plugin for Claude Code. Powered by [Netmiko](https://github.c
 
 ## Installation
 
-### From marketplace (recommended)
-
-**Step 1** — Add the marketplace
+**Step 1** — Install the plugin from marketplace
 
 ```bash
 /plugin marketplace add takumina/clanet-marketplace
-```
-
-**Step 2** — Install the plugin
-
-```bash
 /plugin install clanet@clanet-marketplace
 ```
 
-**Step 3** — Install Python dependencies
+**Step 2** — Clone the repository and install dependencies
+
+Cloning gives you template files, compliance policies, and health check configs locally. Multi-agent teams and customization features rely on these files.
 
 ```bash
-pip install netmiko pyyaml
-```
-
-**Step 4** — Create your inventory file
-
-Marketplace installs don't include template files locally. Paste the following into your terminal:
-
-```bash
-cat <<'EOF' > ~/.net-inventory.yaml
-# clanet inventory - edit host/username/password for your devices
-# device_type reference: https://github.com/ktbyers/netmiko/blob/develop/PLATFORMS.md
-devices:
-  router01:
-    host: 192.168.1.1
-    device_type: cisco_ios
-    username: admin
-    password: CHANGE_ME
-    port: 22
-EOF
-```
-
-Then edit `~/.net-inventory.yaml` with your actual device info:
-
-```bash
-nano ~/.net-inventory.yaml
-```
-
-> **Security tip**: Use `${ENV_VAR}` syntax for passwords instead of plain text. See [Security Considerations](#security-considerations).
-
-### Manual setup
-
-```bash
-# Requirements: Python 3.10+
-
-# 1. Clone and install dependencies
 git clone https://github.com/takumina/clanet.git
 cd clanet
 pip install -r requirements.txt
-
-# 2. Create your inventory
-cp inventory.yaml.example inventory.yaml
-# Edit inventory.yaml with your device info
 ```
+
+**Step 3** — Create your inventory
+
+```bash
+cp templates/inventory.yaml inventory.yaml
+```
+
+Edit `inventory.yaml` with your device info (host, username, password, device_type):
+
+```bash
+nano inventory.yaml
+```
+
+> **Security tip**: Use `${ENV_VAR}` syntax for passwords instead of plain text. See [Security Considerations](#security-considerations).
 
 ## Quick Start
 
@@ -191,7 +161,7 @@ Claude reads device state, diagnoses the root cause, and suggests a fix.
 For multi-step operations, define context upfront:
 
 ```bash
-cp context.yaml.example context.yaml
+cp templates/context.yaml context.yaml
 # Edit context.yaml with your topology, constraints, and success criteria
 ```
 
@@ -276,7 +246,7 @@ Design principles (inspired by [JANOG 57 NETCON Agent Teams](https://zenn.dev/ta
 - **Safety through role separation** - Each agent has strict constraints on what it can/cannot do
 - **Autonomous workflow** - Agents communicate via SendMessage, no manual coordination needed
 
-Compliance policies are defined in `policies/example.yaml` and are fully customizable.
+Compliance policies are defined in `templates/policy.yaml` and are fully customizable.
 
 ## Customization
 
@@ -286,7 +256,7 @@ Plugin updates will never overwrite this file.
 ```yaml
 # .clanet.yaml
 inventory: ./my-inventory.yaml
-policy_file: ./policies/my-company-policy.yaml
+policy_file: ./my-policy.yaml
 default_profile: security
 auto_backup: true
 ```
@@ -294,13 +264,13 @@ auto_backup: true
 | Setting | Description | Default |
 |---------|-------------|---------|
 | `inventory` | Path to device inventory file | `./inventory.yaml` |
-| `policy_file` | Path to compliance policy YAML | `policies/example.yaml` |
+| `policy_file` | Path to compliance policy YAML | `templates/policy.yaml` |
 | `default_profile` | Default audit profile (`basic`/`security`/`full`) | `basic` |
 | `auto_backup` | Auto-backup before config changes | `false` |
-| `health_file` | Path to health check / snapshot commands YAML | `policies/health.yaml` |
+| `health_file` | Path to health check / snapshot commands YAML | `templates/health.yaml` |
 | `context_file` | Path to operation context YAML | `./context.yaml` |
 
-See `clanet.yaml.example` for a full template.
+See `templates/clanet.yaml` for a full template.
 
 ### Operation Context
 
@@ -308,7 +278,7 @@ Define task-specific network topology, symptoms, constraints, and success criter
 When present, `/clanet:validate`, `/clanet:why`, `/clanet:check`, and `/clanet:team` automatically reference it.
 
 ```bash
-cp context.yaml.example context.yaml
+cp templates/context.yaml context.yaml
 # Edit context.yaml for your task
 python3 lib/clanet_cli.py context   # Verify loading
 ```
@@ -336,33 +306,33 @@ To use a custom path, set `context_file` in `.clanet.yaml`.
 
 ### Custom Health Check Commands
 
-Commands executed by `/clanet:check` and `/clanet:snapshot` are defined in `policies/health.yaml`.
+Commands executed by `/clanet:check` and `/clanet:snapshot` are defined in `templates/health.yaml`.
 Customize freely (e.g., remove OSPF checks, add MPLS checks) without code changes.
 
 ```bash
-cp policies/health.yaml policies/my-health.yaml
-# Edit policies/my-health.yaml
+cp templates/health.yaml my-health.yaml
+# Edit my-health.yaml
 ```
 
 Then point to it in `.clanet.yaml`:
 
 ```yaml
-health_file: ./policies/my-health.yaml
+health_file: ./my-health.yaml
 ```
 
 ### Custom Compliance Policy
 
-Copy `policies/example.yaml` and add your own rules:
+Copy `templates/policy.yaml` and add your own rules:
 
 ```bash
-cp policies/example.yaml policies/my-policy.yaml
-# Edit policies/my-policy.yaml with your rules
+cp templates/policy.yaml my-policy.yaml
+# Edit my-policy.yaml with your rules
 ```
 
 Then point to it in `.clanet.yaml`:
 
 ```yaml
-policy_file: ./policies/my-policy.yaml
+policy_file: ./my-policy.yaml
 ```
 
 The compliance-checker agent and `/clanet:audit` will automatically use your custom policy.
@@ -395,20 +365,20 @@ devices:
 ## Architecture
 
 ```
-clanet-plugin/
+clanet/
 ├── .claude-plugin/plugin.json    # Plugin manifest
 ├── commands/                     # 16 slash commands
 ├── agents/                       # 3 specialized agents
 ├── skills/team/SKILL.md          # Multi-agent orchestration skill
 ├── lib/clanet_cli.py             # Common CLI engine (single source of truth)
 ├── tests/test_cli.py             # Unit tests (no network required)
-├── policies/
-│   ├── example.yaml              # Compliance rules (customizable)
-│   └── health.yaml               # Health check & snapshot commands
-├── inventory.yaml.example         # Device inventory template
-├── context.yaml.example           # Operation context template
-├── clanet.yaml.example            # Plugin config template
-└── requirements.txt               # Python dependencies
+├── templates/                    # User-customizable config templates
+│   ├── inventory.yaml            # Device inventory
+│   ├── context.yaml              # Operation context
+│   ├── clanet.yaml               # Plugin config
+│   ├── policy.yaml               # Compliance rules
+│   └── health.yaml               # Health check commands
+└── requirements.txt              # Python dependencies
 ```
 
 All 16 commands and 3 agents share `lib/clanet_cli.py` — no duplicated connection or parsing logic.
@@ -438,7 +408,7 @@ clanet is a Claude Code plugin — it structures prompts and orchestrates tools 
 
 | Problem | Cause | Solution |
 |---------|-------|----------|
-| `ERROR: inventory.yaml not found` | No inventory file in search paths | `cp inventory.yaml.example inventory.yaml` and edit |
+| `ERROR: inventory.yaml not found` | No inventory file in search paths | `cp templates/inventory.yaml inventory.yaml` and edit |
 | `ERROR: Netmiko is not installed` | Missing Python dependency | `pip install netmiko` |
 | `ERROR: device 'xxx' not found` | Device name not in inventory | Check `inventory.yaml` device names; use exact name or IP |
 | `SSH connection timeout` | Device unreachable or wrong port | Verify host/port in inventory; test with `ssh user@host -p port` |

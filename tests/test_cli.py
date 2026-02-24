@@ -147,12 +147,12 @@ class TestCommitPlatform:
 
 
 class TestHealthConfig:
-    """Tests that policies/health.yaml is valid and has expected structure."""
+    """Tests that templates/health.yaml is valid and has expected structure."""
 
     @pytest.fixture
     def health_config(self):
         import yaml
-        health_path = Path(__file__).parent.parent / "policies" / "health.yaml"
+        health_path = Path(__file__).parent.parent / "templates" / "health.yaml"
         with open(health_path) as f:
             return yaml.safe_load(f)
 
@@ -177,7 +177,7 @@ class TestHealthConfig:
             assert has_config, f"{vendor} snapshot missing running-config command"
 
     def test_load_health_config_success(self, monkeypatch):
-        """_load_health_config() should load from policies/health.yaml."""
+        """_load_health_config() should load from templates/health.yaml."""
         monkeypatch.setattr(clanet_cli, "_config", {"health_file": None})
         monkeypatch.chdir(Path(__file__).parent.parent)
         hc = clanet_cli._load_health_config()
@@ -340,12 +340,12 @@ class TestArtifacts:
 
 
 class TestDefaultPolicyFile:
-    """Tests that policies/example.yaml is valid YAML with expected structure."""
+    """Tests that templates/policy.yaml is valid YAML with expected structure."""
 
     @pytest.fixture
     def default_policy(self):
         import yaml
-        policy_path = Path(__file__).parent.parent / "policies" / "example.yaml"
+        policy_path = Path(__file__).parent.parent / "templates" / "policy.yaml"
         with open(policy_path) as f:
             return yaml.safe_load(f)
 

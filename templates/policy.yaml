@@ -3,11 +3,11 @@
 # This policy file contains recommended default rules.
 # Copy and customize for your environment:
 #
-#   cp policies/example.yaml policies/my-policy.yaml
-#   # Edit policies/my-policy.yaml
+#   cp templates/policy.yaml my-policy.yaml
+#   # Edit my-policy.yaml
 #
 # Then point to it in .clanet.yaml:
-#   policy_file: ./policies/my-policy.yaml
+#   policy_file: ./my-policy.yaml
 #
 # Rule types:
 #   pattern_deny   - Block if command matches this regex

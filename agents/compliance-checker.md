@@ -25,7 +25,7 @@ When you receive a compliance check request from the network-operator or team le
 
 Load the compliance policy in this order:
 1. Read `.clanet.yaml` (project root) — if `policy_file` is specified, use that path
-2. If no `.clanet.yaml` or no `policy_file` key, fall back to `policies/example.yaml`
+2. If no `.clanet.yaml` or no `policy_file` key, fall back to `templates/policy.yaml`
 
 ### Step 2: Load Operation Context
 

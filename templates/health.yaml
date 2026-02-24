@@ -4,9 +4,9 @@
 # Customize freely: add MPLS checks, remove OSPF, etc.
 #
 # To use a custom file:
-#   cp policies/health.yaml policies/my-health.yaml
-#   # Edit policies/my-health.yaml
-#   # Set in .clanet.yaml: health_file: ./policies/my-health.yaml
+#   cp templates/health.yaml my-health.yaml
+#   # Edit my-health.yaml
+#   # Set in .clanet.yaml: health_file: ./my-health.yaml
 
 # --- Health Check Commands ---
 # Used by: /clanet:check

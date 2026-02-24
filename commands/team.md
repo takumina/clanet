@@ -48,7 +48,7 @@ prompt: |
   You are the compliance checker for team clanet-change.
   Wait for a COMPLIANCE CHECK REQUEST from network-operator.
   When received:
-  1. Read policies/example.yaml
+  1. Read templates/policy.yaml
   2. Check each proposed command against all rules
   3. Send COMPLIANCE CHECK RESULT with verdict (PASS/WARN/BLOCK) back to network-operator via SendMessage
 ```
