@@ -16,16 +16,7 @@ Network automation plugin for Claude Code. Powered by [Netmiko](https://github.c
 
 ## Installation
 
-**Step 1** — Install the plugin from marketplace
-
-```bash
-/plugin marketplace add takumina/clanet-marketplace
-/plugin install clanet@clanet-marketplace
-```
-
-**Step 2** — Clone the repository and install dependencies
-
-Cloning gives you template files, compliance policies, and health check configs locally. Multi-agent teams and customization features rely on these files.
+**Step 1** — Clone the repository and install dependencies
 
 ```bash
 git clone https://github.com/takumina/clanet.git
@@ -33,7 +24,7 @@ cd clanet
 pip install -r requirements.txt
 ```
 
-**Step 3** — Create your inventory
+**Step 2** — Create your inventory
 
 ```bash
 cp templates/inventory.yaml inventory.yaml
@@ -46,6 +37,18 @@ nano inventory.yaml
 ```
 
 > **Security tip**: Use `${ENV_VAR}` syntax for passwords instead of plain text. See [Security Considerations](#security-considerations).
+
+**Step 3** — Start Claude Code and install the plugin
+
+```bash
+claude    # Start Claude Code from the clanet directory
+```
+
+In Claude Code, run:
+
+```
+/plugin install clanet@clanet-marketplace
+```
 
 ## Quick Start
 
