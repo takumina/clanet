@@ -92,6 +92,35 @@ DEFAULT_CONFIG: dict = {
 
 COMMIT_PLATFORMS = {"cisco_xr", "juniper_junos"}
 
+# ---------------------------------------------------------------------------
+# Self-lockout detection patterns (per vendor)
+# ---------------------------------------------------------------------------
+# Each entry: (interface_pattern, dangerous_sub_pattern, description)
+# interface_pattern matches the 'interface ...' line for management interfaces.
+# dangerous_sub_pattern matches commands under that interface that would cause lockout.
+_LOCKOUT_MGMT_INTERFACE: dict[str, str] = {
+    "cisco_ios": r"interface\s+(Management\S*|Mgmt\S*|GigabitEthernet0/0)\s*$",
+    "cisco_xr": r"interface\s+MgmtEth\S*",
+    "cisco_nxos": r"interface\s+mgmt0\s*$",
+    "juniper_junos": r"delete\s+interfaces\s+(em0|fxp0|me0|irb)\S*",
+    "arista_eos": r"interface\s+Management1\s*$",
+}
+
+_LOCKOUT_DANGEROUS_SUB = re.compile(
+    r"^\s*(shutdown|no\s+ip\s+address|no\s+ipv4\s+address)", re.IGNORECASE,
+)
+
+_LOCKOUT_STANDALONE: dict[str, list[tuple[re.Pattern, str]]] = {
+    "cisco_ios": [
+        (re.compile(r"no\s+ip\s+route\s+0\.0\.0\.0", re.IGNORECASE),
+         "removing default route may cut management access"),
+    ],
+    "cisco_xr": [
+        (re.compile(r"no\s+router\s+(ospf|bgp|static)", re.IGNORECASE),
+         "removing routing protocol may cut management access"),
+    ],
+}
+
 # Standard output directory structure
 DIRS = {
     "logs": "logs",
@@ -452,11 +481,91 @@ def _validate_json_commands(raw: str) -> list[str]:
     return commands
 
 
+def _auto_backup(device_name: str, dev: dict) -> str | None:
+    """Take a backup before config change if auto_backup is enabled.
+
+    Returns the backup file path, or None if skipped.
+    """
+    config = get_config()
+    if not config.get("auto_backup"):
+        return None
+
+    hc = _load_health_config()
+    running_cmd = _get_vendor_command(
+        hc, "running_config_command", dev["device_type"], "running_config_command")
+    conn = connect(dev)
+    try:
+        output = conn.send_command(running_cmd, read_timeout=config["read_timeout_long"])
+    finally:
+        conn.disconnect()
+
+    filepath = save_artifact("backups", device_name, output, suffix="pre_change", ext=".cfg")
+    log_operation(device_name, "auto_backup", f"file={filepath}")
+    print(f"[AUTO-BACKUP] {device_name}: saved to {filepath}")
+    return filepath
+
+
+def _check_lockout(commands: list[str], device_type: str) -> None:
+    """Block config commands that would cause SSH self-lockout.
+
+    Raises ConfigError if a dangerous pattern is detected.
+    """
+    # Check management interface + dangerous sub-command combination
+    mgmt_pattern_str = _LOCKOUT_MGMT_INTERFACE.get(device_type)
+    if mgmt_pattern_str:
+        mgmt_re = re.compile(mgmt_pattern_str, re.IGNORECASE)
+        in_mgmt_block = False
+        for cmd in commands:
+            stripped = cmd.strip()
+            # Junos 'delete interfaces ...' is standalone (not a block)
+            if device_type == "juniper_junos" and mgmt_re.search(stripped):
+                raise ConfigError(
+                    f"[LOCKOUT BLOCKED] '{stripped}' — "
+                    "deleting management interface would cut SSH access"
+                )
+            if re.match(r"^interface\s+", stripped, re.IGNORECASE):
+                in_mgmt_block = bool(mgmt_re.search(stripped))
+            elif in_mgmt_block and _LOCKOUT_DANGEROUS_SUB.match(stripped):
+                raise ConfigError(
+                    f"[LOCKOUT BLOCKED] '{stripped}' on management interface — "
+                    "this would cut SSH access to the device"
+                )
+
+    # Check standalone dangerous commands
+    for pattern, desc in _LOCKOUT_STANDALONE.get(device_type, []):
+        for cmd in commands:
+            if pattern.search(cmd.strip()):
+                raise ConfigError(
+                    f"[LOCKOUT BLOCKED] '{cmd.strip()}' — {desc}"
+                )
+
+
 def cmd_config(args):
     """Apply configuration commands."""
     inv = load_inventory()
     dev = get_device(inv, args.device)
     commands = _validate_json_commands(args.commands)
+
+    # Safety gate 1: self-lockout detection
+    _check_lockout(commands, dev["device_type"])
+
+    # Safety gate 2: compliance check (skip with --skip-compliance)
+    if not getattr(args, "skip_compliance", False):
+        violations = _pre_apply_compliance(commands)
+        if violations:
+            for v in violations:
+                print(f"[COMPLIANCE FAIL] {v['rule']} ({v['severity']}): {v['detail']}",
+                      file=sys.stderr)
+            raise ConfigError(
+                f"config blocked: {len(violations)} compliance violation(s). "
+                "Use --skip-compliance to override (logged)."
+            )
+    else:
+        log_operation(args.device, "config", "compliance check skipped by --skip-compliance")
+
+    # Safety gate 3: auto-backup
+    if not getattr(args, "no_backup", False):
+        _auto_backup(args.device, dev)
 
     conn = connect(dev)
     try:
@@ -488,6 +597,33 @@ def cmd_deploy(args):
     config_file = Path(args.file)
     if not config_file.exists():
         raise ConfigError(f"config file '{args.file}' not found")
+
+    # Read file to run safety checks
+    file_commands = [
+        line.strip() for line in config_file.read_text().splitlines()
+        if line.strip() and not line.strip().startswith("!")
+    ]
+
+    # Safety gate 1: self-lockout detection
+    _check_lockout(file_commands, dev["device_type"])
+
+    # Safety gate 2: compliance check
+    if not getattr(args, "skip_compliance", False):
+        violations = _pre_apply_compliance(file_commands)
+        if violations:
+            for v in violations:
+                print(f"[COMPLIANCE FAIL] {v['rule']} ({v['severity']}): {v['detail']}",
+                      file=sys.stderr)
+            raise ConfigError(
+                f"deploy blocked: {len(violations)} compliance violation(s). "
+                "Use --skip-compliance to override (logged)."
+            )
+    else:
+        log_operation(args.device, "deploy", "compliance check skipped by --skip-compliance")
+
+    # Safety gate 3: auto-backup
+    if not getattr(args, "no_backup", False):
+        _auto_backup(args.device, dev)
 
     conn = connect(dev)
     try:
@@ -903,6 +1039,73 @@ def _evaluate_rule(rule: dict, running_config: str) -> tuple[str, str]:
     return "SKIP", "no evaluation criteria defined"
 
 
+def _evaluate_rule_for_commands(rule: dict, commands_text: str) -> tuple[str, str]:
+    """Evaluate a scope:config_commands rule against proposed config commands.
+
+    Returns (status, detail) where status is PASS/FAIL/WARN/SKIP.
+    Only evaluates pattern_deny rules with scope=config_commands.
+    """
+    scope = rule.get("scope")
+    if scope != "config_commands":
+        return "SKIP", "not a config_commands rule"
+
+    pattern_deny = rule.get("pattern_deny")
+    if not pattern_deny:
+        return "SKIP", "no pattern_deny defined"
+
+    pattern_allow = rule.get("pattern_allow")
+    deny_matches = _safe_finditer(pattern_deny, commands_text, re.MULTILINE | re.IGNORECASE)
+    if deny_matches:
+        violations = []
+        for m in deny_matches:
+            matched_line = m.group(0)
+            if pattern_allow and _safe_regex(pattern_allow, matched_line):
+                continue
+            violations.append(matched_line.strip())
+        if violations:
+            return "FAIL", f"policy violation: {violations[0]}"
+        return "PASS", "denied pattern matched but covered by allow exceptions"
+    return "PASS", "no policy violations"
+
+
+def _pre_apply_compliance(commands: list[str]) -> list[dict]:
+    """Run compliance check on proposed config commands before applying.
+
+    Returns list of violations (empty = all clear).
+    Loads policy from .clanet.yaml or default path.
+    """
+    config = get_config()
+    policy_path = config.get("policy_file") or DEFAULT_POLICY_PATH
+    try:
+        with open(policy_path) as f:
+            policy = yaml.safe_load(f)
+    except FileNotFoundError:
+        return []  # No policy file = no violations
+    if not isinstance(policy, dict):
+        return []
+
+    rules_section = policy.get("rules", {})
+    commands_text = "\n".join(commands)
+    violations = []
+
+    for _category, rule_list in rules_section.items():
+        if not isinstance(rule_list, list):
+            continue
+        for rule in rule_list:
+            if not isinstance(rule, dict):
+                continue
+            if rule.get("scope") != "config_commands":
+                continue
+            status, detail = _evaluate_rule_for_commands(rule, commands_text)
+            if status == "FAIL":
+                violations.append({
+                    "rule": rule.get("name", "unnamed"),
+                    "severity": rule.get("severity", "high"),
+                    "detail": detail,
+                })
+    return violations
+
+
 def _load_policy(args) -> dict | None:
     """Load compliance policy from --policy flag, .clanet.yaml, or default."""
     # 1. --policy flag
@@ -1095,12 +1298,20 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("config", help="Apply configuration commands")
     p.add_argument("device")
     p.add_argument("--commands", required=True, help="JSON array of config commands")
+    p.add_argument("--skip-compliance", dest="skip_compliance", action="store_true",
+                   help="Skip pre-apply compliance check (logged)")
+    p.add_argument("--no-backup", dest="no_backup", action="store_true",
+                   help="Skip auto-backup before config change")
     p.set_defaults(func=cmd_config)
 
     # deploy
     p = sub.add_parser("deploy", help="Deploy configuration from file")
     p.add_argument("device")
     p.add_argument("file", help="Config file path")
+    p.add_argument("--skip-compliance", dest="skip_compliance", action="store_true",
+                   help="Skip pre-apply compliance check (logged)")
+    p.add_argument("--no-backup", dest="no_backup", action="store_true",
+                   help="Skip auto-backup before config change")
     p.set_defaults(func=cmd_deploy)
 
     # interact

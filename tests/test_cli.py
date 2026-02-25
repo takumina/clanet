@@ -1491,3 +1491,234 @@ class TestInvalidRegexHandling:
         rule = {"recommend": "([invalid"}
         with pytest.raises(clanet_cli.ConfigError, match="invalid regex"):
             clanet_cli._evaluate_rule(rule, "some config text")
+
+
+# ---------------------------------------------------------------------------
+# Self-lockout detection
+# ---------------------------------------------------------------------------
+
+
+class TestCheckLockout:
+    """Tests for _check_lockout() self-lockout prevention."""
+
+    def test_safe_commands_pass(self):
+        """Normal commands should not raise."""
+        commands = [
+            "interface GigabitEthernet0/1",
+            "description Uplink to core",
+            "no shutdown",
+        ]
+        clanet_cli._check_lockout(commands, "cisco_ios")  # Should not raise
+
+    def test_ios_mgmt_shutdown_blocked(self):
+        """Shutdown on management interface should be blocked (IOS)."""
+        commands = ["interface Management0", "shutdown"]
+        with pytest.raises(clanet_cli.ConfigError, match="LOCKOUT BLOCKED"):
+            clanet_cli._check_lockout(commands, "cisco_ios")
+
+    def test_ios_mgmt_no_ip_blocked(self):
+        """Removing IP from management interface should be blocked (IOS)."""
+        commands = ["interface GigabitEthernet0/0", "no ip address"]
+        with pytest.raises(clanet_cli.ConfigError, match="LOCKOUT BLOCKED"):
+            clanet_cli._check_lockout(commands, "cisco_ios")
+
+    def test_ios_default_route_removal_blocked(self):
+        """Removing default route should be blocked (IOS)."""
+        commands = ["no ip route 0.0.0.0 0.0.0.0 10.0.0.1"]
+        with pytest.raises(clanet_cli.ConfigError, match="LOCKOUT BLOCKED"):
+            clanet_cli._check_lockout(commands, "cisco_ios")
+
+    def test_xr_mgmteth_shutdown_blocked(self):
+        """Shutdown on MgmtEth should be blocked (IOS-XR)."""
+        commands = ["interface MgmtEth0/RP0/CPU0/0", "shutdown"]
+        with pytest.raises(clanet_cli.ConfigError, match="LOCKOUT BLOCKED"):
+            clanet_cli._check_lockout(commands, "cisco_xr")
+
+    def test_xr_no_router_blocked(self):
+        """Removing routing protocol should be blocked (IOS-XR)."""
+        commands = ["no router ospf 1"]
+        with pytest.raises(clanet_cli.ConfigError, match="LOCKOUT BLOCKED"):
+            clanet_cli._check_lockout(commands, "cisco_xr")
+
+    def test_nxos_mgmt0_shutdown_blocked(self):
+        """Shutdown on mgmt0 should be blocked (NX-OS)."""
+        commands = ["interface mgmt0", "shutdown"]
+        with pytest.raises(clanet_cli.ConfigError, match="LOCKOUT BLOCKED"):
+            clanet_cli._check_lockout(commands, "cisco_nxos")
+
+    def test_junos_delete_mgmt_blocked(self):
+        """Deleting management interface should be blocked (Junos)."""
+        commands = ["delete interfaces fxp0"]
+        with pytest.raises(clanet_cli.ConfigError, match="LOCKOUT BLOCKED"):
+            clanet_cli._check_lockout(commands, "juniper_junos")
+
+    def test_eos_management1_shutdown_blocked(self):
+        """Shutdown on Management1 should be blocked (EOS)."""
+        commands = ["interface Management1", "shutdown"]
+        with pytest.raises(clanet_cli.ConfigError, match="LOCKOUT BLOCKED"):
+            clanet_cli._check_lockout(commands, "arista_eos")
+
+    def test_non_mgmt_interface_allowed(self):
+        """Shutdown on a non-management interface should be allowed."""
+        commands = ["interface GigabitEthernet0/1", "shutdown"]
+        clanet_cli._check_lockout(commands, "cisco_ios")  # Should not raise
+
+    def test_mgmt_block_resets_on_new_interface(self):
+        """Entering a new non-mgmt interface resets the mgmt block tracking."""
+        commands = [
+            "interface Management0",
+            "description mgmt",
+            "interface GigabitEthernet0/1",
+            "shutdown",  # This is on Gi0/1, not Management0
+        ]
+        clanet_cli._check_lockout(commands, "cisco_ios")  # Should not raise
+
+    def test_unknown_vendor_passes(self):
+        """Unknown device_type should not block anything."""
+        commands = ["interface Management0", "shutdown"]
+        clanet_cli._check_lockout(commands, "unknown_vendor")  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# Pre-apply compliance check
+# ---------------------------------------------------------------------------
+
+
+class TestEvaluateRuleForCommands:
+    """Tests for _evaluate_rule_for_commands()."""
+
+    def test_non_config_scope_skipped(self):
+        rule = {"scope": "running_config", "pattern_deny": "shutdown"}
+        status, _ = clanet_cli._evaluate_rule_for_commands(rule, "shutdown")
+        assert status == "SKIP"
+
+    def test_config_commands_deny_match(self):
+        rule = {"scope": "config_commands", "pattern_deny": r"write\s+erase"}
+        status, _ = clanet_cli._evaluate_rule_for_commands(rule, "write erase")
+        assert status == "FAIL"
+
+    def test_config_commands_deny_no_match(self):
+        rule = {"scope": "config_commands", "pattern_deny": r"write\s+erase"}
+        status, _ = clanet_cli._evaluate_rule_for_commands(
+            rule, "interface Gi0/1\nno shutdown")
+        assert status == "PASS"
+
+    def test_config_commands_deny_with_allow(self):
+        rule = {
+            "scope": "config_commands",
+            "pattern_deny": r"^shutdown$",
+            "pattern_allow": r"no\s+shutdown",
+        }
+        # "no shutdown" should not match "^shutdown$" deny pattern
+        status, _ = clanet_cli._evaluate_rule_for_commands(rule, "no shutdown")
+        assert status == "PASS"
+
+    def test_config_commands_deny_with_allow_line_match(self):
+        rule = {
+            "scope": "config_commands",
+            "pattern_deny": r"(?m)^\s*shutdown\s*$",
+            "pattern_allow": r"no\s+shutdown",
+        }
+        # "shutdown" (bare) should FAIL, "no shutdown" in the same text won't cover it
+        status, _ = clanet_cli._evaluate_rule_for_commands(rule, "shutdown")
+        assert status == "FAIL"
+
+    def test_no_pattern_deny_skipped(self):
+        rule = {"scope": "config_commands"}
+        status, _ = clanet_cli._evaluate_rule_for_commands(rule, "anything")
+        assert status == "SKIP"
+
+
+class TestPreApplyCompliance:
+    """Tests for _pre_apply_compliance()."""
+
+    def test_no_policy_file_returns_empty(self, tmp_path, monkeypatch):
+        """Missing policy file should return no violations."""
+        monkeypatch.setattr(clanet_cli, "get_config",
+                            lambda: {"policy_file": str(tmp_path / "nonexistent.yaml")})
+        result = clanet_cli._pre_apply_compliance(["interface Gi0/1", "shutdown"])
+        assert result == []
+
+    def test_violation_detected(self, tmp_path, monkeypatch):
+        """Policy violation should be returned."""
+        policy = {
+            "rules": {
+                "security": [
+                    {
+                        "name": "no-write-erase",
+                        "scope": "config_commands",
+                        "pattern_deny": r"write\s+erase",
+                        "severity": "critical",
+                    }
+                ]
+            }
+        }
+        policy_file = tmp_path / "policy.yaml"
+        import yaml
+        policy_file.write_text(yaml.dump(policy))
+        monkeypatch.setattr(clanet_cli, "get_config",
+                            lambda: {"policy_file": str(policy_file)})
+        result = clanet_cli._pre_apply_compliance(["write erase"])
+        assert len(result) == 1
+        assert result[0]["rule"] == "no-write-erase"
+
+    def test_no_violation_passes(self, tmp_path, monkeypatch):
+        """Safe commands should produce no violations."""
+        policy = {
+            "rules": {
+                "security": [
+                    {
+                        "name": "no-write-erase",
+                        "scope": "config_commands",
+                        "pattern_deny": r"write\s+erase",
+                        "severity": "critical",
+                    }
+                ]
+            }
+        }
+        policy_file = tmp_path / "policy.yaml"
+        import yaml
+        policy_file.write_text(yaml.dump(policy))
+        monkeypatch.setattr(clanet_cli, "get_config",
+                            lambda: {"policy_file": str(policy_file)})
+        result = clanet_cli._pre_apply_compliance(["interface Gi0/1", "description test"])
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Auto-backup
+# ---------------------------------------------------------------------------
+
+
+class TestAutoBackup:
+    """Tests for _auto_backup()."""
+
+    def test_skipped_when_disabled(self, monkeypatch):
+        """auto_backup=False should return None without connecting."""
+        monkeypatch.setattr(clanet_cli, "get_config",
+                            lambda: {**clanet_cli.DEFAULT_CONFIG, "auto_backup": False})
+        result = clanet_cli._auto_backup("router01", {"device_type": "cisco_ios"})
+        assert result is None
+
+    def test_runs_when_enabled(self, tmp_path, monkeypatch):
+        """auto_backup=True should create a backup file."""
+        config = {**clanet_cli.DEFAULT_CONFIG, "auto_backup": True}
+        monkeypatch.setattr(clanet_cli, "get_config", lambda: config)
+        monkeypatch.setattr(clanet_cli, "_load_health_config", lambda: {
+            "running_config_command": {"cisco_ios": "show running-config"},
+            "fallback": {"running_config_command": "show running-config"},
+        })
+
+        class FakeConn:
+            def send_command(self, *a, **kw):
+                return "! fake running-config\nhostname router01"
+            def disconnect(self):
+                pass
+
+        monkeypatch.setattr(clanet_cli, "connect", lambda dev: FakeConn())
+        monkeypatch.setattr(clanet_cli, "DIRS", {**clanet_cli.DIRS, "backups": str(tmp_path)})
+
+        result = clanet_cli._auto_backup("router01", {"device_type": "cisco_ios"})
+        assert result is not None
+        assert "pre_change" in result
+        assert Path(result).exists()
