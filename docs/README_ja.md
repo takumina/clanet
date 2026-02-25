@@ -16,16 +16,7 @@
 
 ## インストール
 
-**ステップ 1** — マーケットプレイスからプラグインをインストール
-
-```bash
-/plugin marketplace add takumina/clanet-marketplace
-/plugin install clanet@clanet-marketplace
-```
-
-**ステップ 2** — リポジトリをクローンして依存パッケージをインストール
-
-クローンすると、テンプレートファイル・コンプライアンスポリシー・ヘルスチェック設定などが手元に揃います。マルチエージェントやカスタマイズ機能はこれらのファイルを参照します。
+**ステップ 1** — リポジトリをクローンして依存パッケージをインストール
 
 ```bash
 git clone https://github.com/takumina/clanet.git
@@ -33,7 +24,7 @@ cd clanet
 pip install -r requirements.txt
 ```
 
-**ステップ 3** — インベントリを作成
+**ステップ 2** — インベントリを作成
 
 ```bash
 cp templates/inventory.yaml inventory.yaml
@@ -46,6 +37,18 @@ nano inventory.yaml
 ```
 
 > **セキュリティ推奨**: パスワードは `${ENV_VAR}` 形式で環境変数から読み込めます。詳しくは「[インベントリ形式](#インベントリ形式)」を参照してください。
+
+**ステップ 3** — Claude Code を起動してプラグインをインストール
+
+```bash
+claude    # clanet ディレクトリから起動
+```
+
+Claude Code 内で以下を実行:
+
+```
+/plugin install clanet@clanet-marketplace
+```
 
 ## クイックスタート
 
