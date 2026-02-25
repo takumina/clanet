@@ -21,6 +21,7 @@ Network automation plugin for Claude Code. Powered by [Netmiko](https://github.c
 ```bash
 git clone https://github.com/takumina/clanet.git
 cd clanet
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
