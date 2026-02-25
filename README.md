@@ -54,7 +54,7 @@ In Claude Code, run:
 ## Quick Start
 
 ```bash
-/clanet router01
+/clanet:clanet router01
 /clanet:cmd router01 show ip route
 /clanet:check --all
 ```
@@ -65,7 +65,7 @@ In Claude Code, run:
 
 | Command | Description |
 |---------|-------------|
-| `/clanet <device>` | Connect and show basic device info (show version) |
+| `/clanet:clanet <device>` | Connect and show basic device info (show version) |
 
 ### Command Execution
 

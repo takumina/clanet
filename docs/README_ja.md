@@ -54,7 +54,7 @@ Claude Code 内で以下を実行:
 ## クイックスタート
 
 ```bash
-/clanet router01
+/clanet:clanet router01
 /clanet:cmd router01 show ip route
 /clanet:check --all
 ```
@@ -65,7 +65,7 @@ Claude Code 内で以下を実行:
 
 | コマンド | 説明 |
 |---------|------|
-| `/clanet <device>` | 接続してデバイス基本情報を表示（show version） |
+| `/clanet:clanet <device>` | 接続してデバイス基本情報を表示（show version） |
 
 ### コマンド実行
 
