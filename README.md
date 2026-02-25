@@ -54,9 +54,9 @@ In Claude Code, run:
 ## Quick Start
 
 ```bash
-/clanet:clanet router01
+/clanet:check router01
 /clanet:cmd router01 show ip route
-/clanet:check --all
+/clanet:health --all
 ```
 
 ## Commands
@@ -65,7 +65,7 @@ In Claude Code, run:
 
 | Command | Description |
 |---------|-------------|
-| `/clanet:clanet <device>` | Connect and show basic device info (show version) |
+| `/clanet:check <device>` | Connect and show basic device info (show version) |
 
 ### Command Execution
 
@@ -80,7 +80,7 @@ In Claude Code, run:
 
 | Command | Description |
 |---------|-------------|
-| `/clanet:check [device\|--all]` | Health check (interfaces, BGP, OSPF) |
+| `/clanet:health [device\|--all]` | Health check (interfaces, BGP, OSPF) |
 | `/clanet:backup [device\|--all]` | Backup running configuration |
 | `/clanet:session [device\|--all]` | Check connectivity and session status |
 
@@ -112,10 +112,10 @@ In Claude Code, run:
 
 ```bash
 # Single device
-/clanet:check router01
+/clanet:health router01
 
 # All devices
-/clanet:check --all
+/clanet:health --all
 ```
 
 ### 2. Run show commands
@@ -279,7 +279,7 @@ See `templates/clanet.yaml` for a full template.
 ### Operation Context
 
 Define task-specific network topology, symptoms, constraints, and success criteria in `context.yaml`.
-When present, `/clanet:validate`, `/clanet:why`, `/clanet:check`, and `/clanet:team` automatically reference it.
+When present, `/clanet:validate`, `/clanet:why`, `/clanet:health`, and `/clanet:team` automatically reference it.
 
 ```bash
 cp templates/context.yaml context.yaml
@@ -304,13 +304,13 @@ success_criteria:
 | `topology` | `/clanet:why`, network-operator |
 | `symptoms` | `/clanet:why` |
 | `constraints` | compliance-checker, network-operator |
-| `success_criteria` | `/clanet:validate`, `/clanet:check`, validator |
+| `success_criteria` | `/clanet:validate`, `/clanet:health`, validator |
 
 To use a custom path, set `context_file` in `.clanet.yaml`.
 
 ### Custom Health Check Commands
 
-Commands executed by `/clanet:check` and `/clanet:snapshot` are defined in `templates/health.yaml`.
+Commands executed by `/clanet:health` and `/clanet:snapshot` are defined in `templates/health.yaml`.
 Customize freely (e.g., remove OSPF checks, add MPLS checks) without code changes.
 
 ```bash

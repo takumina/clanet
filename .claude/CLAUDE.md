@@ -20,12 +20,12 @@ clanet/
 ├── .claude-plugin/
 │   └── plugin.json            # Claude Code plugin manifest
 ├── commands/                  # 16 slash command definitions (Markdown)
-│   ├── clanet.md              # /clanet — connect and show version
+│   ├── check.md               # /clanet:check — connect and show version
 │   ├── cmd.md                 # /clanet:cmd — execute show commands
 │   ├── config.md              # /clanet:config — apply config (with safety)
 │   ├── deploy.md              # /clanet:deploy — deploy config from file
 │   ├── interactive.md         # /clanet:interactive — interactive commands
-│   ├── check.md               # /clanet:check — health check
+│   ├── health.md              # /clanet:health — health check
 │   ├── backup.md              # /clanet:backup — backup running-config
 │   ├── session.md             # /clanet:session — connectivity check
 │   ├── mode.md                # /clanet:mode — enable/config mode switching

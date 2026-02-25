@@ -1,6 +1,6 @@
 # clanet Health Check & Snapshot Commands
 #
-# Defines which show commands to run for /clanet:check and /clanet:snapshot.
+# Defines which show commands to run for /clanet:health and /clanet:snapshot.
 # Customize freely: add MPLS checks, remove OSPF, etc.
 #
 # To use a custom file:
@@ -9,7 +9,7 @@
 #   # Set in .clanet.yaml: health_file: ./my-health.yaml
 
 # --- Health Check Commands ---
-# Used by: /clanet:check
+# Used by: /clanet:health
 # These are quick operational commands to assess device health.
 health_commands:
   cisco_ios:

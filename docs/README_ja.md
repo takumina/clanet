@@ -54,9 +54,9 @@ Claude Code 内で以下を実行:
 ## クイックスタート
 
 ```bash
-/clanet:clanet router01
+/clanet:check router01
 /clanet:cmd router01 show ip route
-/clanet:check --all
+/clanet:health --all
 ```
 
 ## コマンド一覧
@@ -65,7 +65,7 @@ Claude Code 内で以下を実行:
 
 | コマンド | 説明 |
 |---------|------|
-| `/clanet:clanet <device>` | 接続してデバイス基本情報を表示（show version） |
+| `/clanet:check <device>` | 接続してデバイス基本情報を表示（show version） |
 
 ### コマンド実行
 
@@ -80,7 +80,7 @@ Claude Code 内で以下を実行:
 
 | コマンド | 説明 |
 |---------|------|
-| `/clanet:check [device\|--all]` | ヘルスチェック（インターフェース、BGP、OSPF） |
+| `/clanet:health [device\|--all]` | ヘルスチェック（インターフェース、BGP、OSPF） |
 | `/clanet:backup [device\|--all]` | running-config のバックアップ |
 | `/clanet:session [device\|--all]` | 接続性・セッション状態を確認 |
 
@@ -112,10 +112,10 @@ Claude Code 内で以下を実行:
 
 ```bash
 # 単一デバイス
-/clanet:check router01
+/clanet:health router01
 
 # 全デバイス
-/clanet:check --all
+/clanet:health --all
 ```
 
 ### 2. show コマンドの実行
@@ -279,7 +279,7 @@ auto_backup: true
 ### 運用コンテキスト
 
 `context.yaml` でタスク固有のネットワーク構成、症状、制約、成功条件を定義できます。
-定義すると、`/clanet:validate`、`/clanet:why`、`/clanet:check`、`/clanet:team` が自動的に参照します。
+定義すると、`/clanet:validate`、`/clanet:why`、`/clanet:health`、`/clanet:team` が自動的に参照します。
 
 ```bash
 cp templates/context.yaml context.yaml
@@ -304,11 +304,11 @@ success_criteria:
 | `topology` | `/clanet:why`, network-operator |
 | `symptoms` | `/clanet:why` |
 | `constraints` | compliance-checker, network-operator |
-| `success_criteria` | `/clanet:validate`, `/clanet:check`, validator |
+| `success_criteria` | `/clanet:validate`, `/clanet:health`, validator |
 
 ### カスタムヘルスチェックコマンド
 
-`/clanet:check` と `/clanet:snapshot` で実行されるコマンドは `templates/health.yaml` で定義されています。
+`/clanet:health` と `/clanet:snapshot` で実行されるコマンドは `templates/health.yaml` で定義されています。
 コード変更なしで自由にカスタマイズできます（例: OSPF チェックの削除、MPLS チェックの追加）。
 
 ```bash
