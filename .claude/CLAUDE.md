@@ -6,7 +6,7 @@ This file provides guidance for AI assistants working on the clanet codebase.
 
 clanet is a **Claude Code plugin** for network automation, powered by [Netmiko](https://github.com/ktbyers/netmiko). It provides 16 slash commands, 3 specialized Claude Code agents, and a multi-agent team orchestration skill for safely managing network devices (Cisco IOS/XR/NX-OS, Juniper, Arista, etc.) via SSH.
 
-- **Version**: 0.2.0
+- **Version**: 0.2.1
 - **License**: MIT
 - **Author**: [takumina](https://github.com/takumina)
 - **Python**: 3.10+
