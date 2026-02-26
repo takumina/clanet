@@ -4,95 +4,104 @@ argument-hint: <device-name> <question-or-problem>
 allowed-tools: [Read, Bash, Glob, Grep]
 ---
 
-# /clanet:why - Network Troubleshooting & Explanation
+# /clanet:why - Network Troubleshooting & Explanation (Claude-Driven)
 
 Diagnose network issues or explain existing configurations using device output.
+You autonomously select the right commands based on your network knowledge.
 
 ## Instructions
 
-1. First, read `context.yaml` if it exists (use `Read` tool or `python3 lib/clanet_cli.py context`):
-   - `topology` — Understand the network layout to guide diagnosis
-   - `symptoms` — Combine with user input to prioritize which commands to run
+### Step 1: Load context
 
-2. Parse the argument: device name and question/problem description.
-   Determine the **mode** based on the user's question:
+If `context.yaml` exists, read it (use `Read` tool or `python3 lib/clanet_cli.py context`):
+- `topology` — Understand the network layout to guide diagnosis
+- `symptoms` — Combine with user input to prioritize investigation
 
-   ### Mode A: Troubleshooting
-   Keywords: "down", "fail", "error", "high", "cannot", "not working", "flapping"
+### Step 2: Parse argument and determine mode
 
-   ### Mode B: Config explanation
-   Keywords: "why is ... configured", "what does ... do", "explain", "what is ... for"
+Parse the argument: device name and question/problem description.
 
-3. Based on the mode, determine which commands to run.
+- **Mode A: Troubleshooting** — keywords like "down", "fail", "error", "cannot", "not working", "flapping", "high CPU"
+- **Mode B: Config explanation** — keywords like "why is ... configured", "what does ... do", "explain"
 
-   **Mode A - Troubleshooting commands:**
-
-   | Problem keyword | Commands to gather |
-   |---|---|
-   | BGP | `show bgp summary`, `show bgp neighbor <ip>`, `show route <peer-ip>`, `show log last 50` |
-   | OSPF | `show ospf neighbor`, `show ospf interface`, `show route ospf`, `show log last 50` |
-   | interface down | `show interface <if>`, `show log last 50`, `show run interface <if>` |
-   | high CPU | `show processes cpu`, `show processes memory`, `show log last 50` |
-   | cannot reach | `show route <ip>`, `show ip interface brief`, `show arp`, `show log last 50` |
-   | CRC / errors | `show interface <if>`, `show controllers <if>` |
-   | flapping | `show log last 100`, `show interface <if>` |
-   | general | `show ip interface brief`, `show log last 50`, `show processes cpu` |
-
-   **Mode B - Config explanation commands:**
-
-   | Question about | Commands to gather |
-   |---|---|
-   | specific feature | `show running-config \| section <feature>` |
-   | specific interface | `show running-config interface <if>`, `show interface <if>` |
-   | route-policy | `show running-config route-policy <name>` |
-   | ACL / prefix-list | `show running-config \| section <acl-name>` |
-   | general | `show running-config` |
-
-   Adapt commands to vendor type (cisco_ios, cisco_xr, juniper_junos, arista_eos).
-
-4. Execute each command:
+### Step 3: Get device info
 
 ```bash
 source .venv/bin/activate 2>/dev/null || true
-python3 lib/clanet_cli.py show "$DEVICE_NAME" $COMMAND
+python3 lib/clanet_cli.py device-info "$DEVICE_NAME"
 ```
 
-5. **Mode A - Present diagnosis:**
+This returns JSON with `device_type`. Use this to select vendor-correct command syntax.
 
-   ```
-   ## Diagnosis: <device-name>
+### Step 4: Select commands using YOUR network knowledge
 
-   **Problem:** <user's description>
-   **Root Cause:** <identified root cause>
+Based on the `device_type`, the user's problem/question, and context, decide which commands to run.
 
-   **Evidence:**
-   - <finding 1 with specific data>
-   - <finding 2>
+**Mode A (Troubleshooting):** Think about what a senior network engineer would check.
+Consider: protocol state, interface counters, routing table, logs, specific neighbor details.
 
-   **Recommended Fix:**
-   1. <step 1>
-   2. <step 2>
+**Mode B (Config explanation):** Think about what config sections are relevant.
+Consider: running-config sections, interface config, route-policy, ACL, protocol config.
 
-   **Suggested commands:**
-   /clanet:config <device> (with specific commands)
-   ```
+Build a JSON array and execute in a single batch (1 SSH connection):
 
-6. **Mode B - Present config analysis:**
+```bash
+source .venv/bin/activate 2>/dev/null || true
+python3 lib/clanet_cli.py show "$DEVICE_NAME" --commands '["cmd1", "cmd2", "cmd3"]'
+```
 
-   ```
-   ## Config Analysis: <device-name>
+### Step 5: Analyze and investigate further (up to 4 additional rounds)
 
-   **Question:** <user's question>
-   **Relevant Config:** (extracted config section)
+Review the output. If you need more detail, run additional commands.
+Examples:
+- BGP neighbor down → check specific neighbor detail, route advertisements
+- OSPF stuck in INIT → check interface MTU, area config, authentication
+- Interface CRC errors → check controller details, cable/optic status
+- Routing loop suspected → trace the path, check route-policy on multiple hops
 
-   **Explanation:**
-   - <what this config does, in plain language>
-   - <why this is typically configured this way>
-   - <any best practice notes>
+Each additional round uses `--commands` for batch execution. **Minimize the number of rounds** — gather related commands into a single batch.
 
-   **Related concepts:**
-   - <brief explanation of underlying protocol/feature>
-   ```
+**Maximum 5 total rounds** (1 initial + up to 4 follow-up).
 
-7. If initial commands are insufficient, run additional commands.
-8. If the problem spans multiple devices, suggest checking the peer device too.
+### Step 6: Present results
+
+**Mode A — Diagnosis:**
+
+```
+## Diagnosis: <device-name>
+
+**Problem:** <user's description>
+**Root Cause:** <identified root cause>
+
+**Evidence:**
+- <finding 1 with specific data>
+- <finding 2>
+
+**Recommended Fix:**
+1. <step 1>
+2. <step 2>
+
+**Suggested commands:**
+/clanet:config <device> (with specific commands)
+```
+
+**Mode B — Config explanation:**
+
+```
+## Config Analysis: <device-name>
+
+**Question:** <user's question>
+**Relevant Config:** (extracted config section)
+
+**Explanation:**
+- <what this config does, in plain language>
+- <why this is typically configured this way>
+- <any best practice notes>
+
+**Related concepts:**
+- <brief explanation of underlying protocol/feature>
+```
+
+### Step 7: Cross-device investigation
+
+If the problem spans multiple devices, suggest checking the peer device too.

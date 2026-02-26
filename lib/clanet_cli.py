@@ -440,15 +440,30 @@ def cmd_info(args):
 
 
 def cmd_show(args):
-    """Execute a show/operational command."""
+    """Execute a show/operational command (single or batch mode)."""
     inv = load_inventory()
     dev = get_device(inv, args.device)
     config = get_config()
-    command = " ".join(args.command)
     conn = connect(dev)
     try:
-        output = conn.send_command(command, read_timeout=config["read_timeout"])
-        print(output)
+        if args.commands:
+            # バッチモード: JSON配列で複数コマンドを1接続で実行
+            commands = json.loads(args.commands)
+            if not isinstance(commands, list):
+                raise ConfigError("--commands must be a JSON array")
+            for cmd in commands:
+                print(f"\n--- {cmd} ---")
+                try:
+                    print(conn.send_command(cmd, read_timeout=config["read_timeout"]))
+                except Exception as e:
+                    print(f"[WARN] {cmd}: {e}")
+        else:
+            # 単一コマンドモード
+            if not args.command:
+                raise ConfigError("command or --commands is required")
+            command = " ".join(args.command)
+            output = conn.send_command(command, read_timeout=config["read_timeout"])
+            print(output)
     finally:
         conn.disconnect()
 
@@ -1291,7 +1306,8 @@ def build_parser() -> argparse.ArgumentParser:
     # show
     p = sub.add_parser("show", help="Execute a show/operational command")
     p.add_argument("device")
-    p.add_argument("command", nargs="+", help="Command to execute")
+    p.add_argument("command", nargs="*", help="Command to execute")
+    p.add_argument("--commands", help="JSON array of commands (batch mode)")
     p.set_defaults(func=cmd_show)
 
     # config

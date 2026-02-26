@@ -217,6 +217,15 @@ class TestArgParser:
         assert args.device == "router01"
         assert args.command == ["show", "ip", "route"]
 
+    def test_show_batch_commands(self):
+        args = self.parser.parse_args([
+            "show", "router01", "--commands",
+            '["show ip interface brief", "show ip route"]'
+        ])
+        assert args.device == "router01"
+        assert args.commands == '["show ip interface brief", "show ip route"]'
+        assert args.command == []
+
     def test_config_command(self):
         args = self.parser.parse_args([
             "config", "router01", "--commands", '["ntp server 10.0.0.1"]'
@@ -878,6 +887,30 @@ class TestSubcommandIntegration:
         patched_env.send_command.assert_called_once_with(
             "show ip route", read_timeout=config["read_timeout"]
         )
+
+    def test_cmd_show_batch(self, patched_env, capsys):
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args([
+            "show", "router01", "--commands",
+            '["show ip interface brief", "show ip route"]'
+        ])
+        clanet_cli.cmd_show(args)
+        captured = capsys.readouterr()
+        assert "--- show ip interface brief ---" in captured.out
+        assert "--- show ip route ---" in captured.out
+        assert patched_env.send_command.call_count == 2
+
+    def test_cmd_show_batch_invalid_json(self, patched_env):
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["show", "router01", "--commands", "{bad}"])
+        with pytest.raises(Exception):
+            clanet_cli.cmd_show(args)
+
+    def test_cmd_show_batch_not_array(self, patched_env):
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["show", "router01", "--commands", '"just a string"'])
+        with pytest.raises(clanet_cli.ConfigError):
+            clanet_cli.cmd_show(args)
 
     def test_cmd_info(self, patched_env, capsys):
         parser = clanet_cli.build_parser()
