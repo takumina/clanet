@@ -34,7 +34,6 @@ import argparse
 import json
 import os
 import re
-import socket
 import sys
 import time
 from datetime import datetime
@@ -690,7 +689,8 @@ def _detect_config_errors(output: str) -> list[dict]:
                 for j in range(i - 1, -1, -1):
                     candidate = lines[j].strip()
                     # Skip empty, error markers, and caret lines
-                    if candidate and not candidate.startswith("%") and not candidate.startswith("^"):
+                    if (candidate and not candidate.startswith("%")
+                            and not candidate.startswith("^")):
                         # Strip prompt prefix (e.g., "RP/0/RP0/CPU0:router(config)#cmd")
                         if "#" in candidate:
                             candidate = candidate.split("#", 1)[-1].strip()
