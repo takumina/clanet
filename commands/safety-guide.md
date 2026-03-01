@@ -116,21 +116,48 @@ Unlike compliance policies (which can be bypassed with `--skip-compliance`), con
 ### How It Works
 
 1. Place `constitution.yaml` in the project root or `~/.constitution.yaml`
-2. Define rules with `pattern_deny` (and optional `pattern_allow`)
+2. Define rules with `pattern_deny` and/or `rule` (natural language)
 3. The CLI checks all config commands against constitutional rules **before** any other safety gate
-4. If a violation is found, the operation is blocked with `[CONSTITUTION VIOLATION]`
+4. If a `pattern_deny` violation is found, the operation is blocked with `[CONSTITUTION VIOLATION]`
+5. If `rule`-only entries exist, a warning is printed (CLI cannot evaluate natural language)
+
+### Rule Types (Constitution & Policy)
+
+Both `constitution.yaml` and `policy.yaml` support the same three patterns:
+
+| Field | Evaluator | When |
+|-------|-----------|------|
+| `pattern_deny` | CLI (regex) | Always — fast, deterministic |
+| `rule` | Claude / compliance-checker (LLM) | `/clanet:config` Step 6 or `/clanet:team` |
+| Both | CLI does regex; LLM also does semantic reasoning | Best of both worlds |
+
+**Policy-specific rule types** (regex-based, CLI-evaluated):
+
+| Field | Check Method |
+|-------|-------------|
+| `pattern_deny` + `pattern_allow` | Deny unless exception matches |
+| `require` / `require_on` | Required pattern, optionally section-scoped |
+| `require_in_running` | Must exist in running-config |
+| `recommend` | Advisory (WARN only, never blocks) |
+| `rule` | Natural language rule for LLM evaluation |
 
 ### Safety Gate Order
 
 ```
 0. _constitution_check()        ← Constitutional rules (NEVER skippable)
+                                   ⚠ Warns if rule-only entries exist
 1. _check_lockout()             ← Self-lockout prevention (not skippable)
 2. _pre_apply_compliance()      ← Policy compliance (--skip-compliance to override)
+                                   ⚠ Warns if policy rule-only entries exist
 3. _auto_backup()               ← Auto-backup (--no-backup to skip)
 4. send_config_set()            ← Execution
 ```
 
-See `templates/constitution.yaml` for the template and example rules.
+**LLM evaluation of `rule` fields** happens at a higher layer:
+- `/clanet:config`: Claude evaluates in Step 6 (EXPLAIN phase)
+- `/clanet:team`: compliance-checker agent evaluates with LLM reasoning
+
+See `templates/constitution.yaml` and `templates/policy.yaml` for templates.
 
 ---
 

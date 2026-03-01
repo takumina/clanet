@@ -88,6 +88,21 @@ Risk criteria:
 | HIGH | `router ospf`, `neighbor`, `shutdown` |
 | CRITICAL | management IP, VTY ACL, `no router`, `reload` |
 
+#### LLM Rule Evaluation
+
+If the CLI output (stderr) indicates rules requiring LLM evaluation, evaluate them here:
+
+1. **Constitution LLM rules**: Check `[CONSTITUTION]` warnings in CLI output. For each listed rule:
+   - Run `python3 lib/clanet_cli.py constitution-rules --llm-only` to get the rule text
+   - Analyze the proposed commands against each natural language `rule`
+   - If any rule is violated → **BLOCK** (constitutional rules are absolute)
+
+2. **Policy LLM rules**: Check `[POLICY]` warnings in CLI output. For each listed rule:
+   - Run `python3 lib/clanet_cli.py policy-rules --llm-only` to get the rule text
+   - Analyze the proposed commands against each natural language `rule`
+   - If severity is CRITICAL/HIGH and violated → recommend cancellation
+   - If severity is MEDIUM/LOW → include as WARN in the explanation
+
 ### Step 7: CONFIRM — Ask user
 
 - For LOW/MEDIUM: [Apply + Verify] / [Apply] / [Cancel]

@@ -373,11 +373,12 @@ class TestDefaultPolicyFile:
         assert "rules" in default_policy
 
     def test_policy_has_expected_categories(self, default_policy):
-        """example.yaml must define security, safety, and standards categories."""
+        """example.yaml must define security, safety, standards, and semantic categories."""
         rules = default_policy["rules"]
         assert "security" in rules
         assert "safety" in rules
         assert "standards" in rules
+        assert "semantic" in rules
 
     def test_policy_has_severity_levels(self, default_policy):
         """example.yaml must define severity levels."""
@@ -2270,7 +2271,7 @@ class TestDefaultConstitutionTemplate:
         assert "rules" in data
 
     def test_all_rules_have_required_fields(self):
-        """Every rule must have id, name, reason, and pattern_deny."""
+        """Every rule must have id, name, reason, and pattern_deny or rule."""
         import yaml
         template_path = Path(__file__).parent.parent / "templates" / "constitution.yaml"
         with open(template_path) as f:
@@ -2280,7 +2281,11 @@ class TestDefaultConstitutionTemplate:
                 assert "id" in rule, f"rule in {category} missing 'id'"
                 assert "name" in rule, f"{rule.get('id', '?')} missing 'name'"
                 assert "reason" in rule, f"{rule['id']} missing 'reason'"
-                assert "pattern_deny" in rule, f"{rule['id']} missing 'pattern_deny'"
+                has_pattern = "pattern_deny" in rule
+                has_rule = "rule" in rule
+                assert has_pattern or has_rule, (
+                    f"{rule['id']} missing both 'pattern_deny' and 'rule'"
+                )
 
     def test_all_ids_are_unique(self):
         """Rule IDs must be globally unique."""
@@ -2303,6 +2308,633 @@ class TestDefaultConstitutionTemplate:
         import re
         for _category, rule_list in data["rules"].items():
             for rule in rule_list:
+                if "pattern_deny" not in rule:
+                    continue  # rule-only entries have no regex
                 re.compile(rule["pattern_deny"])
                 if "pattern_allow" in rule:
                     re.compile(rule["pattern_allow"])
+
+
+# ---------------------------------------------------------------------------
+# Constitution LLM rules (rule-only entries)
+# ---------------------------------------------------------------------------
+
+
+class TestConstitutionLLMRules:
+    """Tests for rule-only (natural language) constitution entries."""
+
+    def _make_constitution(self, tmp_path, monkeypatch, rules):
+        """Helper to set up a constitution file with given rules."""
+        import yaml
+        const = {
+            "constitution": {"name": "test", "version": "1.0"},
+            "rules": rules,
+        }
+        const_file = tmp_path / "constitution.yaml"
+        const_file.write_text(yaml.dump(const))
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS", [str(const_file)])
+
+    def test_rule_only_does_not_block(self, tmp_path, monkeypatch):
+        """rule-only entry should NOT raise ConfigError (CLI cannot evaluate)."""
+        self._make_constitution(tmp_path, monkeypatch, {
+            "intent": [{
+                "id": "CONST-INT-001",
+                "name": "No single point of failure",
+                "severity": "CRITICAL",
+                "reason": "Redundancy required.",
+                "rule": "Reject any config that creates a single point of failure.",
+            }]
+        })
+        # Should not raise
+        clanet_cli._constitution_check(["no ntp server 10.0.0.1"])
+
+    def test_rule_only_prints_warning(self, tmp_path, monkeypatch, capsys):
+        """rule-only entry should print a warning to stderr."""
+        self._make_constitution(tmp_path, monkeypatch, {
+            "intent": [{
+                "id": "CONST-INT-001",
+                "name": "No single point of failure",
+                "severity": "CRITICAL",
+                "reason": "Redundancy required.",
+                "rule": "Reject any config that creates a single point of failure.",
+            }]
+        })
+        clanet_cli._constitution_check(["no ntp server 10.0.0.1"])
+        captured = capsys.readouterr()
+        assert "1 rule(s) require LLM evaluation" in captured.err
+        assert "CONST-INT-001" in captured.err
+        assert "/clanet:team" in captured.err
+
+    def test_hybrid_rule_still_checks_regex(self, tmp_path, monkeypatch):
+        """Hybrid entry (pattern_deny + rule) should still enforce regex."""
+        self._make_constitution(tmp_path, monkeypatch, {
+            "safety": [{
+                "id": "CONST-SAF-003",
+                "name": "No wildcard ACL",
+                "severity": "CRITICAL",
+                "reason": "Security hole.",
+                "pattern_deny": r"permit\s+(ip\s+)?any\s+any",
+                "rule": "Reject overly permissive ACLs.",
+            }]
+        })
+        with pytest.raises(clanet_cli.ConfigError, match="constitutional violation"):
+            clanet_cli._constitution_check(["permit ip any any"])
+
+    def test_hybrid_rule_passes_when_no_regex_match(self, tmp_path, monkeypatch):
+        """Hybrid entry should pass when regex does not match."""
+        self._make_constitution(tmp_path, monkeypatch, {
+            "safety": [{
+                "id": "CONST-SAF-003",
+                "name": "No wildcard ACL",
+                "severity": "CRITICAL",
+                "reason": "Security hole.",
+                "pattern_deny": r"permit\s+(ip\s+)?any\s+any",
+                "rule": "Reject overly permissive ACLs.",
+            }]
+        })
+        # Specific ACL should pass regex check
+        clanet_cli._constitution_check(["permit ip host 10.0.0.1 any"])
+
+    def test_multiple_rule_only_entries_all_warned(self, tmp_path, monkeypatch, capsys):
+        """Multiple rule-only entries should all appear in warnings."""
+        self._make_constitution(tmp_path, monkeypatch, {
+            "intent": [
+                {
+                    "id": "CONST-INT-001",
+                    "name": "No single point of failure",
+                    "severity": "CRITICAL",
+                    "reason": "Redundancy required.",
+                    "rule": "Reject single point of failure.",
+                },
+                {
+                    "id": "CONST-INT-002",
+                    "name": "Change scope must match task",
+                    "severity": "CRITICAL",
+                    "reason": "Scope check.",
+                    "rule": "Reject unrelated changes.",
+                },
+            ]
+        })
+        clanet_cli._constitution_check(["ntp server 10.0.0.1"])
+        captured = capsys.readouterr()
+        assert "2 rule(s) require LLM evaluation" in captured.err
+        assert "CONST-INT-001" in captured.err
+        assert "CONST-INT-002" in captured.err
+
+    def test_rule_only_with_pattern_deny_violation(self, tmp_path, monkeypatch):
+        """pattern_deny violation blocks regardless of rule field presence elsewhere."""
+        self._make_constitution(tmp_path, monkeypatch, {
+            "safety": [{
+                "id": "CONST-SAF-001",
+                "name": "No write erase",
+                "severity": "CRITICAL",
+                "reason": "Destructive.",
+                "pattern_deny": r"write\s+erase",
+            }],
+            "intent": [{
+                "id": "CONST-INT-001",
+                "name": "No single point of failure",
+                "severity": "CRITICAL",
+                "reason": "Redundancy.",
+                "rule": "Reject single point of failure.",
+            }],
+        })
+        with pytest.raises(clanet_cli.ConfigError, match="constitutional violation"):
+            clanet_cli._constitution_check(["write erase"])
+
+
+# ---------------------------------------------------------------------------
+# has_llm_rules()
+# ---------------------------------------------------------------------------
+
+
+class TestHasLLMRules:
+    """Tests for has_llm_rules() function."""
+
+    def test_no_file_returns_empty(self, monkeypatch):
+        """No constitution file → empty list."""
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS",
+                            ["/nonexistent/constitution.yaml"])
+        assert clanet_cli.has_llm_rules() == []
+
+    def test_no_rule_field_returns_empty(self, tmp_path, monkeypatch):
+        """Constitution with only pattern_deny → empty list."""
+        import yaml
+        const = {
+            "rules": {
+                "safety": [{
+                    "id": "CONST-SAF-001",
+                    "name": "No write erase",
+                    "severity": "CRITICAL",
+                    "reason": "Destructive.",
+                    "pattern_deny": r"write\s+erase",
+                }]
+            }
+        }
+        const_file = tmp_path / "constitution.yaml"
+        const_file.write_text(yaml.dump(const))
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS", [str(const_file)])
+        assert clanet_cli.has_llm_rules() == []
+
+    def test_rule_field_detected(self, tmp_path, monkeypatch):
+        """Rules with 'rule' field should be returned."""
+        import yaml
+        const = {
+            "rules": {
+                "safety": [{
+                    "id": "CONST-SAF-001",
+                    "name": "No write erase",
+                    "severity": "CRITICAL",
+                    "reason": "Destructive.",
+                    "pattern_deny": r"write\s+erase",
+                }],
+                "intent": [{
+                    "id": "CONST-INT-001",
+                    "name": "No SPOF",
+                    "severity": "CRITICAL",
+                    "reason": "Redundancy.",
+                    "rule": "Reject single point of failure.",
+                }],
+            }
+        }
+        const_file = tmp_path / "constitution.yaml"
+        const_file.write_text(yaml.dump(const))
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS", [str(const_file)])
+        result = clanet_cli.has_llm_rules()
+        assert len(result) == 1
+        assert result[0]["id"] == "CONST-INT-001"
+
+
+# ---------------------------------------------------------------------------
+# constitution-rules subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestConstitutionRulesCommand:
+    """Tests for cmd_constitution_rules subcommand."""
+
+    def test_no_file_returns_empty_json(self, monkeypatch, capsys):
+        """No constitution file → empty JSON output."""
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS",
+                            ["/nonexistent/constitution.yaml"])
+        args = argparse.Namespace(llm_only=False)
+        clanet_cli.cmd_constitution_rules(args)
+        output = json.loads(capsys.readouterr().out)
+        assert output["constitution"] is None
+        assert output["rules"] == []
+        assert output["total"] == 0
+
+    def test_all_rules_returned(self, tmp_path, monkeypatch, capsys):
+        """All rules should be returned as JSON."""
+        import yaml
+        const = {
+            "constitution": {"name": "test", "version": "1.0"},
+            "rules": {
+                "safety": [{
+                    "id": "CONST-SAF-001",
+                    "name": "No write erase",
+                    "severity": "CRITICAL",
+                    "reason": "Destructive.",
+                    "pattern_deny": r"write\s+erase",
+                }],
+                "intent": [{
+                    "id": "CONST-INT-001",
+                    "name": "No SPOF",
+                    "severity": "CRITICAL",
+                    "reason": "Redundancy.",
+                    "rule": "Reject single point of failure.",
+                }],
+            },
+        }
+        const_file = tmp_path / "constitution.yaml"
+        const_file.write_text(yaml.dump(const))
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS", [str(const_file)])
+        args = argparse.Namespace(llm_only=False)
+        clanet_cli.cmd_constitution_rules(args)
+        output = json.loads(capsys.readouterr().out)
+        assert output["total"] == 2
+        assert output["constitution"]["name"] == "test"
+        ids = [r["id"] for r in output["rules"]]
+        assert "CONST-SAF-001" in ids
+        assert "CONST-INT-001" in ids
+
+    def test_llm_only_filter(self, tmp_path, monkeypatch, capsys):
+        """--llm-only should only return rules with 'rule' field."""
+        import yaml
+        const = {
+            "constitution": {"name": "test", "version": "1.0"},
+            "rules": {
+                "safety": [{
+                    "id": "CONST-SAF-001",
+                    "name": "No write erase",
+                    "severity": "CRITICAL",
+                    "reason": "Destructive.",
+                    "pattern_deny": r"write\s+erase",
+                }],
+                "intent": [{
+                    "id": "CONST-INT-001",
+                    "name": "No SPOF",
+                    "severity": "CRITICAL",
+                    "reason": "Redundancy.",
+                    "rule": "Reject single point of failure.",
+                }],
+            },
+        }
+        const_file = tmp_path / "constitution.yaml"
+        const_file.write_text(yaml.dump(const))
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS", [str(const_file)])
+        args = argparse.Namespace(llm_only=True)
+        clanet_cli.cmd_constitution_rules(args)
+        output = json.loads(capsys.readouterr().out)
+        assert output["total"] == 1
+        assert output["rules"][0]["id"] == "CONST-INT-001"
+
+
+# ---------------------------------------------------------------------------
+# Policy LLM rules (rule-only entries)
+# ---------------------------------------------------------------------------
+
+
+class TestPolicyLLMRules:
+    """Tests for rule-only (natural language) policy entries."""
+
+    def test_rule_only_skipped_in_evaluate_rule(self):
+        """rule-only entry should return SKIP in _evaluate_rule."""
+        rule = {
+            "id": "SEM-001",
+            "name": "Semantic check",
+            "severity": "MEDIUM",
+            "rule": "Check something with LLM.",
+        }
+        status, detail = clanet_cli._evaluate_rule(rule, "hostname router01")
+        assert status == "SKIP"
+        assert "LLM" in detail
+
+    def test_rule_only_skipped_in_evaluate_rule_for_commands(self):
+        """rule-only entry with scope=config_commands should SKIP in _evaluate_rule_for_commands."""
+        rule = {
+            "id": "SEM-001",
+            "name": "Semantic check",
+            "scope": "config_commands",
+            "rule": "Check something with LLM.",
+        }
+        status, detail = clanet_cli._evaluate_rule_for_commands(
+            rule, "interface Gi0/1\ndescription test"
+        )
+        assert status == "SKIP"
+        assert "LLM" in detail
+
+    def test_hybrid_rule_still_checks_regex(self):
+        """Hybrid entry (pattern_deny + rule) should still enforce regex."""
+        rule = {
+            "scope": "config_commands",
+            "pattern_deny": r"no logging\b.*",
+            "pattern_allow": r"no logging console",
+            "rule": "Reject config that disables all logging.",
+        }
+        # "no logging 10.0.0.1" matches deny but not allow → FAIL
+        status, _ = clanet_cli._evaluate_rule_for_commands(
+            rule, "no logging 10.0.0.1"
+        )
+        assert status == "FAIL"
+
+    def test_hybrid_rule_passes_when_allowed(self):
+        """Hybrid entry should pass when allow exception matches."""
+        rule = {
+            "scope": "config_commands",
+            "pattern_deny": r"no logging\b.*",
+            "pattern_allow": r"no logging console",
+            "rule": "Reject config that disables all logging.",
+        }
+        status, _ = clanet_cli._evaluate_rule_for_commands(
+            rule, "no logging console"
+        )
+        assert status == "PASS"
+
+    def test_audit_rule_only_skipped(self):
+        """rule-only entry without scope should SKIP in _evaluate_rule (audit)."""
+        rule = {
+            "id": "SEM-099",
+            "name": "Audit semantic check",
+            "rule": "Check running config semantically.",
+        }
+        status, detail = clanet_cli._evaluate_rule(
+            rule, "hostname router01\nntp server 10.0.0.1"
+        )
+        assert status == "SKIP"
+        assert "rule-only" in detail
+
+
+# ---------------------------------------------------------------------------
+# has_policy_llm_rules()
+# ---------------------------------------------------------------------------
+
+
+class TestHasPolicyLLMRules:
+    """Tests for has_policy_llm_rules() function."""
+
+    def test_no_file_returns_empty(self, tmp_path, monkeypatch):
+        """No policy file → empty list."""
+        monkeypatch.setattr(clanet_cli, "_config",
+                            {"policy_file": str(tmp_path / "nonexistent.yaml")})
+        assert clanet_cli.has_policy_llm_rules() == []
+
+    def test_no_rule_field_returns_empty(self, tmp_path, monkeypatch):
+        """Policy with only regex rules → empty list."""
+        import yaml
+        policy = {
+            "rules": {
+                "safety": [{
+                    "id": "SAF-001",
+                    "name": "Mgmt protection",
+                    "severity": "CRITICAL",
+                    "pattern_deny": "interface Mgmt",
+                    "scope": "config_commands",
+                }]
+            }
+        }
+        policy_file = tmp_path / "policy.yaml"
+        policy_file.write_text(yaml.dump(policy))
+        monkeypatch.setattr(clanet_cli, "_config",
+                            {"policy_file": str(policy_file)})
+        assert clanet_cli.has_policy_llm_rules() == []
+
+    def test_rule_field_detected(self, tmp_path, monkeypatch):
+        """Rules with 'rule' field should be returned."""
+        import yaml
+        policy = {
+            "rules": {
+                "safety": [{
+                    "id": "SAF-001",
+                    "name": "Mgmt protection",
+                    "severity": "CRITICAL",
+                    "pattern_deny": "interface Mgmt",
+                    "scope": "config_commands",
+                }],
+                "semantic": [{
+                    "id": "SEM-001",
+                    "name": "Semantic check",
+                    "severity": "MEDIUM",
+                    "rule": "Check something with LLM.",
+                    "scope": "config_commands",
+                }],
+            }
+        }
+        policy_file = tmp_path / "policy.yaml"
+        policy_file.write_text(yaml.dump(policy))
+        monkeypatch.setattr(clanet_cli, "_config",
+                            {"policy_file": str(policy_file)})
+        result = clanet_cli.has_policy_llm_rules()
+        assert len(result) == 1
+        assert result[0]["id"] == "SEM-001"
+
+    def test_hybrid_rule_detected(self, tmp_path, monkeypatch):
+        """Hybrid rules (pattern_deny + rule) should also be returned."""
+        import yaml
+        policy = {
+            "rules": {
+                "safety": [{
+                    "id": "SAF-003",
+                    "name": "No disabling logging",
+                    "severity": "HIGH",
+                    "pattern_deny": "no logging",
+                    "rule": "Reject config that disables all logging.",
+                    "scope": "config_commands",
+                }],
+            }
+        }
+        policy_file = tmp_path / "policy.yaml"
+        policy_file.write_text(yaml.dump(policy))
+        monkeypatch.setattr(clanet_cli, "_config",
+                            {"policy_file": str(policy_file)})
+        result = clanet_cli.has_policy_llm_rules()
+        assert len(result) == 1
+        assert result[0]["id"] == "SAF-003"
+
+    def test_default_policy_has_llm_rules(self, monkeypatch):
+        """Default templates/policy.yaml should have LLM rules after update."""
+        monkeypatch.setattr(clanet_cli, "_config", {"policy_file": None})
+        monkeypatch.chdir(Path(__file__).parent.parent)
+        result = clanet_cli.has_policy_llm_rules()
+        assert len(result) >= 2  # SEM-001, SEM-002, and possibly SAF-003
+        ids = [r["id"] for r in result]
+        assert "SEM-001" in ids
+        assert "SEM-002" in ids
+
+
+# ---------------------------------------------------------------------------
+# Pre-apply compliance warning for rule-only entries
+# ---------------------------------------------------------------------------
+
+
+class TestPreApplyComplianceWarning:
+    """Tests that _pre_apply_compliance() warns about rule-only policy entries."""
+
+    def test_rule_only_warning_printed(self, tmp_path, monkeypatch, capsys):
+        """rule-only entries should produce a warning to stderr."""
+        import yaml
+        policy = {
+            "rules": {
+                "semantic": [{
+                    "id": "SEM-001",
+                    "name": "Interface description check",
+                    "severity": "MEDIUM",
+                    "rule": "Check interface has description.",
+                    "scope": "config_commands",
+                }]
+            }
+        }
+        policy_file = tmp_path / "policy.yaml"
+        policy_file.write_text(yaml.dump(policy))
+        monkeypatch.setattr(clanet_cli, "get_config",
+                            lambda: {"policy_file": str(policy_file)})
+        clanet_cli._pre_apply_compliance(["interface Gi0/1", "no shutdown"])
+        captured = capsys.readouterr()
+        assert "[POLICY]" in captured.err
+        assert "1 rule(s) require LLM evaluation" in captured.err
+        assert "SEM-001" in captured.err
+
+    def test_no_warning_when_no_rule_only(self, tmp_path, monkeypatch, capsys):
+        """No rule-only entries → no warning."""
+        import yaml
+        policy = {
+            "rules": {
+                "safety": [{
+                    "id": "SAF-001",
+                    "name": "Mgmt protection",
+                    "severity": "CRITICAL",
+                    "pattern_deny": "interface Mgmt",
+                    "scope": "config_commands",
+                }]
+            }
+        }
+        policy_file = tmp_path / "policy.yaml"
+        policy_file.write_text(yaml.dump(policy))
+        monkeypatch.setattr(clanet_cli, "get_config",
+                            lambda: {"policy_file": str(policy_file)})
+        clanet_cli._pre_apply_compliance(["interface Gi0/1", "no shutdown"])
+        captured = capsys.readouterr()
+        assert "[POLICY]" not in captured.err
+
+    def test_hybrid_not_warned_as_rule_only(self, tmp_path, monkeypatch, capsys):
+        """Hybrid rules (pattern_deny + rule) should NOT be warned as rule-only."""
+        import yaml
+        policy = {
+            "rules": {
+                "safety": [{
+                    "id": "SAF-003",
+                    "name": "No disabling logging",
+                    "severity": "HIGH",
+                    "pattern_deny": "no logging",
+                    "pattern_allow": "no logging console",
+                    "rule": "Reject config that disables all logging.",
+                    "scope": "config_commands",
+                }]
+            }
+        }
+        policy_file = tmp_path / "policy.yaml"
+        policy_file.write_text(yaml.dump(policy))
+        monkeypatch.setattr(clanet_cli, "get_config",
+                            lambda: {"policy_file": str(policy_file)})
+        clanet_cli._pre_apply_compliance(["ntp server 10.0.0.1"])
+        captured = capsys.readouterr()
+        assert "[POLICY]" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# policy-rules subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestPolicyRulesCommand:
+    """Tests for cmd_policy_rules subcommand."""
+
+    def test_no_file_returns_empty_json(self, tmp_path, monkeypatch, capsys):
+        """No policy file → empty JSON output."""
+        monkeypatch.setattr(clanet_cli, "_config",
+                            {"policy_file": str(tmp_path / "nonexistent.yaml")})
+        args = argparse.Namespace(llm_only=False)
+        clanet_cli.cmd_policy_rules(args)
+        output = json.loads(capsys.readouterr().out)
+        assert output["policy"] is None
+        assert output["rules"] == []
+        assert output["total"] == 0
+
+    def test_all_rules_returned(self, tmp_path, monkeypatch, capsys):
+        """All rules should be returned as JSON."""
+        import yaml
+        policy = {
+            "policy": {"name": "test-policy", "version": "1.0"},
+            "rules": {
+                "safety": [{
+                    "id": "SAF-001",
+                    "name": "Mgmt protection",
+                    "severity": "CRITICAL",
+                    "pattern_deny": "interface Mgmt",
+                    "scope": "config_commands",
+                }],
+                "semantic": [{
+                    "id": "SEM-001",
+                    "name": "Semantic check",
+                    "severity": "MEDIUM",
+                    "rule": "Check with LLM.",
+                    "scope": "config_commands",
+                }],
+            },
+        }
+        policy_file = tmp_path / "policy.yaml"
+        policy_file.write_text(yaml.dump(policy))
+        monkeypatch.setattr(clanet_cli, "_config",
+                            {"policy_file": str(policy_file)})
+        args = argparse.Namespace(llm_only=False)
+        clanet_cli.cmd_policy_rules(args)
+        output = json.loads(capsys.readouterr().out)
+        assert output["total"] == 2
+        assert output["policy"]["name"] == "test-policy"
+        ids = [r["id"] for r in output["rules"]]
+        assert "SAF-001" in ids
+        assert "SEM-001" in ids
+
+    def test_llm_only_filter(self, tmp_path, monkeypatch, capsys):
+        """--llm-only should only return rules with 'rule' field."""
+        import yaml
+        policy = {
+            "policy": {"name": "test-policy", "version": "1.0"},
+            "rules": {
+                "safety": [{
+                    "id": "SAF-001",
+                    "name": "Mgmt protection",
+                    "severity": "CRITICAL",
+                    "pattern_deny": "interface Mgmt",
+                    "scope": "config_commands",
+                }],
+                "semantic": [{
+                    "id": "SEM-001",
+                    "name": "Semantic check",
+                    "severity": "MEDIUM",
+                    "rule": "Check with LLM.",
+                    "scope": "config_commands",
+                }],
+            },
+        }
+        policy_file = tmp_path / "policy.yaml"
+        policy_file.write_text(yaml.dump(policy))
+        monkeypatch.setattr(clanet_cli, "_config",
+                            {"policy_file": str(policy_file)})
+        args = argparse.Namespace(llm_only=True)
+        clanet_cli.cmd_policy_rules(args)
+        output = json.loads(capsys.readouterr().out)
+        assert output["total"] == 1
+        assert output["rules"][0]["id"] == "SEM-001"
+
+    def test_parser_registered(self):
+        """policy-rules subcommand should be registered in build_parser."""
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["policy-rules"])
+        assert args.command == "policy-rules"
+
+    def test_parser_llm_only_flag(self):
+        """--llm-only flag should be parsed."""
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["policy-rules", "--llm-only"])
+        assert args.llm_only is True

@@ -7,12 +7,18 @@
 # Commands violating these rules are blocked even with --skip-compliance.
 #
 # Rule structure:
-#   - id:           Unique identifier (CONST-XXX-NNN)
-#   - name:         Rule name
-#   - severity:     CRITICAL (only CRITICAL is supported)
-#   - reason:       Human-readable explanation of why this is blocked
-#   - pattern_deny: Regex to detect violations
+#   - id:            Unique identifier (CONST-XXX-NNN)
+#   - name:          Rule name
+#   - severity:      CRITICAL (only CRITICAL is supported)
+#   - reason:        Human-readable explanation of why this is blocked
+#   - pattern_deny:  Regex to detect violations (evaluated by CLI)
 #   - pattern_allow: (optional) Exception pattern for pattern_deny
+#   - rule:          (optional) Natural language rule for LLM evaluation
+#
+# Three patterns:
+#   pattern_deny only      → CLI checks automatically (fast, always works)
+#   rule only              → ONLY checked by compliance-checker in /clanet:team
+#   pattern_deny + rule    → CLI does regex; team also does LLM reasoning
 
 constitution:
   name: example-constitution
@@ -32,6 +38,17 @@ rules:
       reason: Destructive operation that may discard unsaved changes. Reload manually.
       pattern_deny: '^\s*reload\s*$'
 
+    - id: CONST-SAF-003
+      name: No wildcard ACL entries
+      severity: CRITICAL
+      reason: Wildcard "permit any any" ACL entries create security holes.
+      pattern_deny: 'permit\s+(ip\s+)?any\s+any'
+      rule: >
+        Reject any access-list configuration that is overly permissive.
+        Even if the exact "permit any any" pattern is not used, block
+        equivalent constructs like "permit ip 0.0.0.0/0 0.0.0.0/0" or
+        any ACL entry that effectively allows all traffic.
+
   security:
     - id: CONST-SEC-001
       name: No telnet allowed
@@ -39,3 +56,23 @@ rules:
       reason: Telnet is unencrypted. Use SSH only.
       pattern_deny: 'transport input.*telnet'
       pattern_allow: 'transport input ssh'
+
+  intent:
+    - id: CONST-INT-001
+      name: No single point of failure
+      severity: CRITICAL
+      reason: Every critical path must have redundancy.
+      rule: >
+        Reject any configuration that creates a single point of failure.
+        Examples: configuring only one NTP server, removing a redundant BGP
+        neighbor leaving only one, or removing a backup static route when
+        no dynamic routing covers the same prefix.
+
+    - id: CONST-INT-002
+      name: Change scope must match task
+      severity: CRITICAL
+      reason: Configuration changes must be scoped to the stated task.
+      rule: >
+        Reject any command that modifies systems or features unrelated to
+        the stated task. For example, if the task is "add NTP server",
+        reject commands that modify BGP, OSPF, or interface configurations.

@@ -11,6 +11,7 @@ logs/
 backups/
 snapshots/
 audit/
+procedures/
 
 # Inventory (contains credentials)
 inventory.yaml

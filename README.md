@@ -9,8 +9,9 @@ Network automation plugin for Claude Code. Powered by [Netmiko](https://github.c
 - **15 slash commands** — from `show` commands to full config deployment
 - **Risk assessment** — Claude analyzes every config change for impact before execution
 - **Self-lockout prevention** — blocks changes that would cut your SSH access
-- **Multi-agent teams** — 3 specialized agents (compliance / operator / validator) coordinate autonomously
-- **Compliance auditing** — customizable policy rules with severity levels
+- **Multi-agent teams** — 4 specialized agents (planner / compliance / operator / validator) with dynamic operator scaling
+- **Constitutional rules** — unskippable safety rules that override everything
+- **Compliance auditing** — customizable policy rules with regex + natural language (LLM-evaluated)
 - **Pre/post validation** — automatic snapshots and diff for change verification
 - **Multi-vendor** — Cisco IOS/XR/NX-OS, Juniper, Arista, and more via Netmiko
 
@@ -103,7 +104,7 @@ In Claude Code, run:
 
 | Command | Description |
 |---------|-------------|
-| `/clanet:team <device> <task>` | 3-agent team for safe config changes (compliance → execute → validate) |
+| `/clanet:team <device\|all> <task>` | Multi-agent team for safe config changes (plan → compliance → execute → validate) |
 
 ## How to Use
 
@@ -156,9 +157,17 @@ For quick changes without snapshots:
 
 ```bash
 /clanet:team router01 Set description "Uplink to core-sw01" on GigabitEthernet0/0/0/0
-# compliance-checker → validates against policy
-# network-operator   → generates and applies config
+# planner            → investigates state, designs plan, creates procedure
+# compliance-checker → validates against policy (regex + LLM)
+# operator(s)        → generates and applies config (scaled dynamically)
 # validator          → verifies health after change
+```
+
+For multi-device changes, operators are scaled automatically:
+
+```bash
+/clanet:team all Change OSPF cost to 100 on all WAN interfaces
+# Spawns 1-4 operators based on device count for parallel execution
 ```
 
 ### 6. Use operation context for complex tasks
@@ -185,7 +194,7 @@ Then run any command as usual — clanet automatically reads the context:
 ```bash
 /clanet:config router01      # Uses success_criteria for PASS/FAIL
 /clanet:why router01 BGP down # Uses topology + symptoms for diagnosis
-/clanet:team router01 Fix BGP # All 3 agents respect constraints
+/clanet:team router01 Fix BGP # All agents respect constraints
 ```
 
 ### 7. Compliance audit
@@ -210,48 +219,76 @@ Every configuration change follows the **"Show, Explain, Confirm, Verify"** work
 ```
 
 Built-in safety features:
+- **Constitutional rules** - Absolute rules in `constitution.yaml` that can NEVER be skipped, even with `--skip-compliance`
 - **Self-lockout prevention** - Blocks changes that would cut SSH access to the device
+- **Two-layer compliance** - Regex rules enforced by CLI + natural language `rule` fields evaluated by Claude (LLM)
 - **Risk assessment** - Claude evaluates each change before execution
 - **Operation logging** - Every change is recorded in `logs/clanet_operations.log`
 - **Post-change verification** - Automatic health check after config changes
 
 ## Multi-Agent Mode
 
-For complex operations, `/clanet:team` coordinates three Claude Code agents with strict role separation:
+For complex operations, `/clanet:team` coordinates four specialized agents with dynamic operator scaling:
 
 ```bash
 /clanet:team router01 Set description "Uplink to core-sw01" on GigabitEthernet0/0/0/0
 ```
 
-Three specialized agents coordinate automatically:
-
 ```
+Phase 1 (always):
          ┌──────────────┐
-         │   Operator    │  Generate config → Execute
+         │   Planner     │  Investigate → Plan → Procedure → Approve
          └──────┬───────┘
-                ↓ COMPLIANCE CHECK REQUEST
-         ┌──────────────┐
-         │  Compliance   │  Policy violation check
-         │  Checker      │  → PASS / WARN / BLOCK
-         └──────┬───────┘
-                ↓ CONFIG APPLIED
-         ┌──────────────┐
-         │  Validator    │  Post-change health check
-         │              │  → PASS / FAIL
-         └──────────────┘
+                ↓ Approved plan
+
+Phase 2 (dynamic):
+   ┌────────────┐  ┌────────────┐
+   │ operator-1  │  │ operator-2  │ ... (1-4 operators)
+   │ Group 1     │  │ Group 2     │     scaled by device count
+   └──────┬─────┘  └──────┬─────┘
+          ↓                ↓
+         ┌──────────────────────┐
+         │  Compliance Checker   │  Policy + Constitution check
+         │                      │  → PASS / WARN / BLOCK
+         └──────────────────────┘
+          ↓                ↓
+         ┌──────────────────────┐
+         │     Validator         │  Post-change health check
+         └──────────────────────┘
 ```
 
 | Agent | Role | Hard Constraint |
 |-------|------|-----------------|
-| **compliance-checker** | Validates config against policy | NEVER executes commands. Judgment only. |
-| **network-operator** | Generates vendor-correct config and executes | NEVER applies config without compliance PASS. |
+| **planner** | Investigates state, designs plan, creates procedure docs | NEVER executes config commands. |
+| **compliance-checker** | Validates config against policy (regex + LLM) | NEVER executes commands. Judgment only. |
+| **network-operator** | Generates vendor-correct config and executes | NEVER applies without plan + compliance PASS + human approval. |
 | **validator** | Post-change health verification | NEVER makes config changes. Show commands only. |
+
+### Dynamic Operator Scaling
+
+For multi-device changes, operators are scaled automatically:
+
+| Device Count | Operators | Strategy |
+|-------------|-----------|----------|
+| 1 | 1 | No parallelism needed |
+| 2-4 | 2 | Moderate parallelism |
+| 5+ | min(4, group_count) | Resource cap at 4 operators |
+
+### Two-Layer Compliance
+
+The compliance-checker evaluates two layers of rules:
+
+| Layer | Rule Type | Evaluator |
+|-------|-----------|-----------|
+| **Regex** | `pattern_deny`, `require`, etc. | CLI engine (automatic) |
+| **Semantic** | Natural language `rule` field | LLM reasoning (compliance-checker) |
 
 Design principles (inspired by [JANOG 57 NETCON Agent Teams](https://zenn.dev/takumina/articles/01d5d284aa5eef)):
 - **Safety through role separation** - Each agent has strict constraints on what it can/cannot do
 - **Autonomous workflow** - Agents communicate via SendMessage, no manual coordination needed
+- **Procedure documents** - Planner creates a Markdown procedure before any execution
 
-Compliance policies are defined in `templates/policy.yaml` and are fully customizable.
+Compliance policies are defined in `templates/policy.yaml` and constitutional rules in `templates/constitution.yaml`.
 
 ## Customization
 
@@ -302,9 +339,9 @@ success_criteria:
 
 | Section | Used by |
 |---------|---------|
-| `topology` | `/clanet:why`, network-operator |
+| `topology` | `/clanet:why`, planner, network-operator |
 | `symptoms` | `/clanet:why` |
-| `constraints` | compliance-checker, network-operator |
+| `constraints` | planner, compliance-checker, network-operator |
 | `success_criteria` | `/clanet:config`, `/clanet:health`, validator |
 
 To use a custom path, set `context_file` in `.clanet.yaml`.
@@ -340,7 +377,34 @@ Then point to it in `.clanet.yaml`:
 policy_file: ./my-policy.yaml
 ```
 
+Rules support three patterns:
+- **`pattern_deny` only** — CLI checks automatically (fast, deterministic)
+- **`rule` only** — natural language rule evaluated by Claude (LLM)
+- **Both** — CLI does regex; Claude also does semantic reasoning
+
 The compliance-checker agent and `/clanet:audit` will automatically use your custom policy.
+
+### Constitutional Rules
+
+Constitutional rules are **absolute and cannot be skipped** — not even with `--skip-compliance`.
+
+```bash
+cp templates/constitution.yaml constitution.yaml
+# Edit constitution.yaml with your absolute rules
+```
+
+Place it in the project root or `~/.constitution.yaml`. No `.clanet.yaml` entry needed.
+
+```yaml
+# constitution.yaml
+rules:
+  safety:
+    - id: CONST-SAF-001
+      name: No write erase
+      severity: CRITICAL
+      reason: Destructive operation that wipes the entire device configuration.
+      pattern_deny: 'write\s+erase'
+```
 
 ## Supported Vendors
 
@@ -373,7 +437,11 @@ devices:
 clanet/
 ├── .claude-plugin/plugin.json    # Plugin manifest
 ├── commands/                     # 15 slash commands
-├── agents/                       # 3 specialized agents
+├── agents/                       # 4 specialized agents
+│   ├── planner.md                # Investigation, planning, procedure docs
+│   ├── compliance-checker.md     # Policy validation (read-only)
+│   ├── network-operator.md       # Config generation + execution
+│   └── validator.md              # Post-change health verification
 ├── skills/team/SKILL.md          # Multi-agent orchestration skill
 ├── lib/clanet_cli.py             # Common CLI engine (single source of truth)
 ├── tests/test_cli.py             # Unit tests (no network required)
@@ -381,19 +449,20 @@ clanet/
 │   ├── inventory.yaml            # Device inventory
 │   ├── context.yaml              # Operation context
 │   ├── clanet.yaml               # Plugin config
-│   ├── policy.yaml               # Compliance rules
+│   ├── policy.yaml               # Compliance rules (regex + LLM)
+│   ├── constitution.yaml         # Constitutional rules (unskippable)
 │   └── health.yaml               # Health check commands
 └── requirements.txt              # Python dependencies
 ```
 
-All 15 commands and 3 agents share `lib/clanet_cli.py` — no duplicated connection or parsing logic.
+All 15 commands and 4 agents share `lib/clanet_cli.py` — no duplicated connection or parsing logic.
 
 ### What clanet builds vs. what Claude provides
 
 | Layer | Implementation | Examples |
 |-------|---------------|----------|
 | **SSH & device automation** | Python (Netmiko) in `lib/clanet_cli.py` | Connection, command execution, backup, snapshot, logging |
-| **Policy engine** | Python regex engine in `_evaluate_rule()` | `pattern_deny`, `require`, `recommend` — deterministic rule evaluation |
+| **Policy engine** | Python regex engine in `_evaluate_rule()` | `pattern_deny`, `require`, `recommend` — deterministic rule evaluation; `rule` field → LLM evaluation |
 | **Safety workflows** | Prompt definitions in `commands/` | "Show, Explain, Confirm, Verify" — structured prompt sequences |
 | **Risk assessment & diagnosis** | Claude's LLM reasoning, directed by prompts | `/clanet:why` troubleshooting, config change risk levels |
 | **Agent coordination** | Claude Code agent framework (`agents/`) | Role-separated agents with tool restrictions |

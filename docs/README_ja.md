@@ -6,11 +6,12 @@
 
 ## 特徴
 
-- **16 のスラッシュコマンド** — show コマンドからコンフィグ投入まで
+- **15 のスラッシュコマンド** — show コマンドからコンフィグ投入まで
 - **リスク評価** — 設定変更前に Claude が影響度を分析
 - **自己ロックアウト防止** — SSH アクセスを遮断する変更を自動検知・ブロック
-- **マルチエージェント** — 3 つの専門エージェント（コンプライアンス / オペレータ / バリデータ）が自律連携
-- **コンプライアンス監査** — カスタマイズ可能なポリシールールと重大度レベル
+- **マルチエージェント** — 4 つの専門エージェント（プランナー / コンプライアンス / オペレータ / バリデータ）が動的スケーリングで自律連携
+- **憲法ルール** — `--skip-compliance` でもスキップ不可の絶対的安全ルール
+- **コンプライアンス監査** — 正規表現 + 自然言語（LLM 評価）のカスタマイズ可能なポリシールール
 - **Pre/Post 検証** — 変更前後のスナップショット自動取得と差分比較
 - **マルチベンダー** — Cisco IOS/XR/NX-OS、Juniper、Arista 他、Netmiko 対応機器全般
 
@@ -103,7 +104,7 @@ Claude Code 内で以下を実行:
 
 | コマンド | 説明 |
 |---------|------|
-| `/clanet:team <device> <task>` | 3 エージェントによる安全な設定変更（コンプライアンス → 実行 → 検証） |
+| `/clanet:team <device\|all> <task>` | マルチエージェントによる安全な設定変更（計画 → コンプライアンス → 実行 → 検証） |
 
 ## 使い方
 
@@ -156,9 +157,17 @@ Claude がデバイスの状態を読み取り、根本原因を診断し、修�
 
 ```bash
 /clanet:team router01 GigabitEthernet0/0/0/0 に description "Uplink to core-sw01" を設定
-# compliance-checker → ポリシー違反チェック
-# network-operator   → コンフィグ生成・適用
+# planner            → 状態調査、計画作成、手順書作成
+# compliance-checker → ポリシー違反チェック（正規表現 + LLM）
+# operator(s)        → コンフィグ生成・適用（動的スケーリング）
 # validator          → 変更後のヘルスチェック
+```
+
+マルチデバイス変更では、オペレータが自動的にスケーリングされます:
+
+```bash
+/clanet:team all すべての WAN インターフェースの OSPF コストを 100 に変更
+# デバイス数に基づいて 1-4 のオペレータを並列実行
 ```
 
 ### 6. 運用コンテキストの活用
@@ -185,7 +194,7 @@ success_criteria:
 ```bash
 /clanet:config router01      # success_criteria で PASS/FAIL 判定
 /clanet:why router01 BGP down # topology + symptoms で診断
-/clanet:team router01 Fix BGP # 3 エージェントが constraints を遵守
+/clanet:team router01 Fix BGP # 全エージェントが constraints を遵守
 ```
 
 ### 7. コンプライアンス監査
@@ -210,48 +219,76 @@ success_criteria:
 ```
 
 組み込みの安全機能:
+- **憲法ルール** — `constitution.yaml` の絶対ルール。`--skip-compliance` でもスキップ不可
 - **自己ロックアウト防止** — 管理インターフェースや VTY ACL を遮断する変更をブロック
+- **二層コンプライアンス** — CLI が正規表現ルールを自動適用 + Claude（LLM）が自然言語 `rule` フィールドを評価
 - **リスク評価** — Claude が変更ごとにリスクレベルを判定
 - **操作ログ** — すべての変更を `logs/clanet_operations.log` に記録
 - **変更後検証** — コンフィグ適用後に自動ヘルスチェック
 
 ## マルチエージェントモード
 
-複雑な操作では、`/clanet:team` が役割分離された 3 つの Claude Code エージェントを連携させます:
+複雑な操作では、`/clanet:team` が 4 つの専門エージェントを動的オペレータスケーリングで連携させます:
 
 ```bash
 /clanet:team router01 GigabitEthernet0/0/0/0 に description "Uplink to core-sw01" を設定
 ```
 
-3 つの専門エージェントが自律的に連携:
-
 ```
+Phase 1（常に実行）:
          ┌──────────────┐
-         │  Operator     │  コンフィグ生成 → 実行
+         │   Planner     │  状態調査 → 計画 → 手順書 → 承認
          └──────┬───────┘
-                ↓ コンプライアンスチェック依頼
-         ┌──────────────┐
-         │  Compliance   │  ポリシー違反チェック
-         │  Checker      │  → PASS / WARN / BLOCK
-         └──────┬───────┘
-                ↓ コンフィグ適用後
-         ┌──────────────┐
-         │  Validator    │  変更後のヘルスチェック
-         │               │  → PASS / FAIL
-         └──────────────┘
+                ↓ 承認済み計画
+
+Phase 2（動的スケーリング）:
+   ┌────────────┐  ┌────────────┐
+   │ operator-1  │  │ operator-2  │ ...（1-4 オペレータ）
+   │ Group 1     │  │ Group 2     │    デバイス数に応じてスケール
+   └──────┬─────┘  └──────┬─────┘
+          ↓                ↓
+         ┌──────────────────────┐
+         │  Compliance Checker   │  ポリシー + 憲法チェック
+         │                      │  → PASS / WARN / BLOCK
+         └──────────────────────┘
+          ↓                ↓
+         ┌──────────────────────┐
+         │     Validator         │  変更後のヘルスチェック
+         └──────────────────────┘
 ```
 
 | エージェント | 役割 | 絶対条件 |
 |------------|------|---------|
-| **compliance-checker** | ポリシーに基づく設定検証 | コマンド実行は禁止。判定のみ。 |
-| **network-operator** | ベンダー正確なコンフィグ生成・実行 | コンプライアンス PASS なしでは実行禁止。 |
+| **planner** | 状態調査、計画作成、手順書作成 | コンフィグコマンドの実行は禁止。 |
+| **compliance-checker** | ポリシーに基づく設定検証（正規表現 + LLM） | コマンド実行は禁止。判定のみ。 |
+| **network-operator** | ベンダー正確なコンフィグ生成・実行 | 計画 + コンプライアンス PASS + 人間の承認なしでは実行禁止。 |
 | **validator** | 変更後のヘルス検証 | 設定変更は禁止。show コマンドのみ。 |
+
+### 動的オペレータスケーリング
+
+マルチデバイス変更では、オペレータが自動的にスケーリングされます:
+
+| デバイス数 | オペレータ数 | 戦略 |
+|-----------|------------|------|
+| 1 | 1 | 並列化不要 |
+| 2-4 | 2 | 適度な並列化 |
+| 5+ | min(4, グループ数) | リソース上限 4 オペレータ |
+
+### 二層コンプライアンス
+
+compliance-checker は 2 つのレイヤーでルールを評価します:
+
+| レイヤー | ルール種別 | 評価者 |
+|---------|-----------|--------|
+| **正規表現** | `pattern_deny`, `require` など | CLI エンジン（自動） |
+| **セマンティック** | 自然言語 `rule` フィールド | LLM 推論（compliance-checker） |
 
 設計思想（[JANOG 57 NETCON エージェントチーム](https://zenn.dev/takumina/articles/01d5d284aa5eef) に着想を得ています）:
 - **役割分離による安全性** — 各エージェントが実行できる操作を厳密に制限
 - **自律ワークフロー** — エージェント間は SendMessage で通信、手動の調整は不要
+- **手順書** — Planner が実行前に Markdown の手順書を作成
 
-コンプライアンスポリシーは `templates/policy.yaml` で定義され、自由にカスタマイズできます。
+コンプライアンスポリシーは `templates/policy.yaml`、憲法ルールは `templates/constitution.yaml` で定義されます。
 
 ## カスタマイズ
 
@@ -302,9 +339,9 @@ success_criteria:
 
 | セクション | 使用コマンド |
 |-----------|------------|
-| `topology` | `/clanet:why`, network-operator |
+| `topology` | `/clanet:why`, planner, network-operator |
 | `symptoms` | `/clanet:why` |
-| `constraints` | compliance-checker, network-operator |
+| `constraints` | planner, compliance-checker, network-operator |
 | `success_criteria` | `/clanet:config`, `/clanet:health`, validator |
 
 ### カスタムヘルスチェックコマンド
@@ -338,7 +375,34 @@ cp templates/policy.yaml my-policy.yaml
 policy_file: ./my-policy.yaml
 ```
 
+ルールは 3 つのパターンをサポート:
+- **`pattern_deny` のみ** — CLI が自動チェック（高速・決定論的）
+- **`rule` のみ** — Claude（LLM）が自然言語ルールを評価
+- **両方** — CLI が正規表現をチェック + Claude がセマンティック推論
+
 compliance-checker エージェントと `/clanet:audit` が自動的にカスタムポリシーを使用します。
+
+### 憲法ルール
+
+憲法ルールは**絶対的でスキップ不可**です — `--skip-compliance` でもスキップできません。
+
+```bash
+cp templates/constitution.yaml constitution.yaml
+# constitution.yaml を編集
+```
+
+プロジェクトルートまたは `~/.constitution.yaml` に配置します。`.clanet.yaml` でのパス指定は不要です。
+
+```yaml
+# constitution.yaml
+rules:
+  safety:
+    - id: CONST-SAF-001
+      name: No write erase
+      severity: CRITICAL
+      reason: デバイス設定を全消去する破壊的操作。
+      pattern_deny: 'write\s+erase'
+```
 
 ## 対応ベンダー
 
@@ -386,8 +450,12 @@ export NET_PASSWORD='your-secure-password'
 ```
 clanet/
 ├── .claude-plugin/plugin.json    # プラグインマニフェスト
-├── commands/                     # 16 のスラッシュコマンド
-├── agents/                       # 3 つの専門エージェント
+├── commands/                     # 15 のスラッシュコマンド
+├── agents/                       # 4 つの専門エージェント
+│   ├── planner.md                # 状態調査、計画作成、手順書作成
+│   ├── compliance-checker.md     # ポリシー検証（読み取り専用）
+│   ├── network-operator.md       # コンフィグ生成・実行
+│   └── validator.md              # 変更後のヘルス検証
 ├── skills/team/SKILL.md          # マルチエージェントオーケストレーション
 ├── lib/clanet_cli.py             # 共通 CLI エンジン（単一ソースオブトゥルース）
 ├── tests/test_cli.py             # ユニットテスト（ネットワーク不要）
@@ -395,19 +463,20 @@ clanet/
 │   ├── inventory.yaml            # デバイスインベントリ
 │   ├── context.yaml              # 運用コンテキスト
 │   ├── clanet.yaml               # プラグイン設定
-│   ├── policy.yaml               # コンプライアンスルール
+│   ├── policy.yaml               # コンプライアンスルール（正規表現 + LLM）
+│   ├── constitution.yaml         # 憲法ルール（スキップ不可）
 │   └── health.yaml               # ヘルスチェックコマンド
 └── requirements.txt              # Python 依存パッケージ
 ```
 
-全 16 コマンドと 3 エージェントが `lib/clanet_cli.py` を共有 — 接続・パースロジックの重複はゼロです。
+全 15 コマンドと 4 エージェントが `lib/clanet_cli.py` を共有 — 接続・パースロジックの重複はゼロです。
 
 ### clanet の実装と Claude の役割
 
 | レイヤー | 実装 | 例 |
 |---------|------|-----|
 | **SSH・デバイス自動化** | Python (Netmiko) `lib/clanet_cli.py` | 接続、コマンド実行、バックアップ、スナップショット、ログ |
-| **ポリシーエンジン** | Python 正規表現 `_evaluate_rule()` | `pattern_deny`, `require`, `recommend` — 決定論的ルール評価 |
+| **ポリシーエンジン** | Python 正規表現 `_evaluate_rule()` | `pattern_deny`, `require`, `recommend` — 決定論的ルール評価; `rule` フィールド → LLM 評価 |
 | **安全ワークフロー** | プロンプト定義 `commands/` | 「表示→説明→確認→検証」— 構造化されたプロンプトシーケンス |
 | **リスク評価・診断** | Claude の LLM 推論（プロンプトで誘導） | `/clanet:why` のトラブルシューティング、変更リスク判定 |
 | **エージェント連携** | Claude Code エージェントフレームワーク `agents/` | ツール制限付きの役割分離エージェント |

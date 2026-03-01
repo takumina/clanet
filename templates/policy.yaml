@@ -17,6 +17,13 @@
 #   require_in_running - Pattern must exist in running-config
 #   recommend      - Best practice suggestion (WARN only, never blocks)
 #   scope          - When to evaluate: config_commands | interface_config
+#   rule           - Natural language rule for LLM evaluation
+#                    (evaluated by Claude in /clanet:config, or by compliance-checker in /clanet:team)
+#
+# Three patterns (same as constitution.yaml):
+#   pattern_deny only      → CLI checks automatically (fast, always works)
+#   rule only              → LLM evaluates (/clanet:config Step 6 or /clanet:team)
+#   pattern_deny + rule    → CLI does regex; LLM also does semantic reasoning
 
 policy:
   name: clanet-default
@@ -56,6 +63,19 @@ rules:
       description: "Removing an entire routing protocol is prohibited."
       pattern_deny: 'no router (ospf|bgp|isis|eigrp)'
 
+    - id: SAF-003
+      name: No disabling all logging
+      severity: HIGH
+      description: "Removing all logging destinations is prohibited."
+      pattern_deny: 'no logging\b.*'
+      pattern_allow: 'no logging console'
+      rule: >
+        Reject any configuration that would effectively disable all logging.
+        Even if individual "no logging" commands are allowed (like "no logging
+        console"), block if the combined effect removes all syslog server
+        destinations.
+      scope: config_commands
+
   # === Standards ===
   # Baseline configuration requirements
   standards:
@@ -70,6 +90,30 @@ rules:
       severity: MEDIUM
       description: "A syslog destination must be configured."
       require_in_running: 'logging.*\d+\.\d+\.\d+\.\d+'
+
+  # === Semantic (LLM-evaluated) ===
+  # Rules requiring natural language understanding — evaluated by Claude, not regex
+  semantic:
+    - id: SEM-001
+      name: Interface changes need description
+      severity: MEDIUM
+      description: "Interface changes should include a description for documentation."
+      rule: >
+        If any interface configuration is being applied, verify that a
+        'description' command is also included for that interface. Flag
+        if an interface is being configured without setting or updating
+        its description.
+      scope: config_commands
+
+    - id: SEM-002
+      name: Consistent naming conventions
+      severity: LOW
+      description: "Interface descriptions should follow site naming conventions."
+      rule: >
+        Interface descriptions should be meaningful and follow a consistent
+        format such as "Link-to-<destination>" or "<purpose>_<circuit-id>".
+        Flag descriptions that are too vague like "test", "temp", or "asdf".
+      scope: config_commands
 
 severity_levels:
   CRITICAL: "Must fix. Blocks deployment."

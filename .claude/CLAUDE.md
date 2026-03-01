@@ -4,7 +4,7 @@ This file provides guidance for AI assistants working on the clanet codebase.
 
 ## Project Overview
 
-clanet is a **Claude Code plugin** for network automation, powered by [Netmiko](https://github.com/ktbyers/netmiko). It provides 15 slash commands, 3 specialized Claude Code agents, and a multi-agent team orchestration skill for safely managing network devices (Cisco IOS/XR/NX-OS, Juniper, Arista, etc.) via SSH.
+clanet is a **Claude Code plugin** for network automation, powered by [Netmiko](https://github.com/ktbyers/netmiko). It provides 15 slash commands, 4 specialized Claude Code agents, and a multi-agent team orchestration skill for safely managing network devices (Cisco IOS/XR/NX-OS, Juniper, Arista, etc.) via SSH.
 
 - **Version**: 0.2.1
 - **License**: MIT
@@ -35,7 +35,8 @@ clanet/
 │   ├── audit.md               # /clanet:audit — compliance audit
 │   ├── team.md                # /clanet:team — multi-agent team change
 │   └── safety-guide.md        # [internal] shared safety framework
-├── agents/                    # 3 specialized agent definitions
+├── agents/                    # 4 specialized agent definitions
+│   ├── planner.md             # Investigation, planning, procedure docs
 │   ├── compliance-checker.md  # Policy validation (read-only)
 │   ├── network-operator.md    # Config generation + execution
 │   └── validator.md           # Post-change health verification
@@ -63,21 +64,61 @@ clanet/
 
 ### Single CLI Engine
 
-All 15 slash commands and 3 agents delegate to `lib/clanet_cli.py`. There is no duplicated connection, parsing, or artifact logic. When adding new functionality, extend this single file rather than creating new scripts.
+All 15 slash commands and 4 agents delegate to `lib/clanet_cli.py`. There is no duplicated connection, parsing, or artifact logic. When adding new functionality, extend this single file rather than creating new scripts.
 
 ### Agent Role Separation
 
-The three agents have strict boundaries:
+The four agents have strict boundaries:
 
 | Agent | Can Do | Cannot Do |
 |-------|--------|-----------|
+| **planner** | Investigate state, design plans, create procedure docs, get plan approval | Execute config commands |
 | **compliance-checker** | Read policies, analyze commands, send verdicts | Execute commands, connect to devices |
-| **network-operator** | Generate config, execute approved changes | Apply config without compliance PASS |
+| **network-operator** | Generate config, execute approved changes | Apply config without plan + compliance PASS + human approval |
 | **validator** | Run show commands, compare snapshots | Make config changes |
+
+### Dynamic Operator Scaling
+
+When `/clanet:team` handles multi-device changes, operators are dynamically scaled for parallel execution:
+
+```
+Phase 1: Spawn planner + compliance-checker + validator
+         ↓ planner sends APPROVED CHANGE PLAN with Device Groups
+Phase 2: Spawn operator-1..N based on device count
+         ↓ each operator handles its assigned group in parallel
+```
+
+| Device Count | Operators | Assignment |
+|-------------|-----------|------------|
+| 1 | 1 (operator-1) | All devices |
+| 2-4 | 2 (operator-1, operator-2) | Round-robin by group |
+| 5+ | min(4, group_count) | Round-robin by group |
+
+Key behaviors:
+- Planner groups devices in the plan (by dependency → site → role → balance)
+- Team lead spawns operators in Phase 2 and assigns Device Groups
+- Each operator independently runs Steps 2-8 per device (generate → compliance → approve → execute → validate)
+- Operators report OPERATOR COMPLETE to team lead when all assigned devices are done
+- If planner omits Device Groups, team lead falls back to alphabetical split
 
 ### Safety-First Config Changes
 
 All config-changing commands follow the **"Show, Explain, Confirm, Verify"** pattern defined in `commands/safety-guide.md`. Self-lockout prevention blocks changes to management interfaces, VTY ACLs, and management routing.
+
+### Two-Layer Rule System (Constitution & Policy)
+
+Both `constitution.yaml` and `policy.yaml` support three evaluation patterns:
+
+| Field | Evaluator | When |
+|-------|-----------|------|
+| `pattern_deny` | CLI (regex) | Always — fast, deterministic |
+| `rule` | Claude / compliance-checker (LLM) | `/clanet:config` Step 6 or `/clanet:team` |
+| Both | CLI does regex; LLM also does semantic reasoning | Best of both worlds |
+
+- **CLI**: Evaluates `pattern_deny` rules. Warns about `rule`-only entries (CLI cannot evaluate natural language).
+- **`/clanet:config`**: Claude evaluates `rule` fields in Step 6 (EXPLAIN phase) when CLI warnings indicate LLM rules exist.
+- **`/clanet:team`**: compliance-checker agent evaluates both regex and natural language `rule` fields using LLM reasoning.
+- `cmd_constitution_rules` / `cmd_policy_rules` subcommands provide rules as JSON for agent consumption.
 
 ### External-Only Policy Rules
 
@@ -86,6 +127,7 @@ Compliance rules live entirely in YAML files (`templates/policy.yaml`). The audi
 - `require` / `require_on` — required pattern, optionally scoped to a config section
 - `require_in_running` — must exist in running-config
 - `recommend` — advisory (WARN only)
+- `rule` — natural language rule for LLM evaluation
 - `scope` — when to evaluate (`config_commands` | `interface_config`)
 
 ## Development Guide
@@ -164,6 +206,7 @@ All tests should pass in a clean checkout. `templates/health.yaml` ships with th
 | `backups/` | `<device>_YYYYMMDD_HHMMSS.cfg` | Yes |
 | `snapshots/` | `<device>_<pre|post>_YYYYMMDD_HHMMSS.json` | Yes |
 | `audit/` | `<device>_YYYYMMDD_HHMMSS.md` | Yes |
+| `procedures/` | `<task-summary>_YYYYMMDD_HHMMSS.md` | Yes |
 
 ### Configuration Search Order
 

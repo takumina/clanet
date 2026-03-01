@@ -26,6 +26,8 @@ Subcommands:
     device-info <device>                  Print device metadata as JSON
     list                                  List all devices in inventory
     context                               Display loaded operation context
+    constitution-rules [--llm-only]       Print constitutional rules as JSON
+    policy-rules  [--llm-only]            Print policy rules as JSON
 """
 
 import argparse
@@ -262,11 +264,32 @@ def _load_constitution() -> dict | None:
     return None
 
 
+def has_llm_rules() -> list[dict]:
+    """Return constitutional rules that have 'rule' field (LLM-evaluable)."""
+    data = _load_constitution()
+    if not data:
+        return []
+    rules_section = data.get("rules", {})
+    if not rules_section:
+        return []
+    result = []
+    for _category, rule_list in rules_section.items():
+        if not isinstance(rule_list, list):
+            continue
+        for rule in rule_list:
+            if isinstance(rule, dict) and "rule" in rule:
+                result.append(rule)
+    return result
+
+
 def _constitution_check(commands: list[str]) -> None:
     """Check commands against constitutional rules (NEVER skippable).
 
     Raises ConfigError if any constitutional rule is violated.
     Unlike compliance checks, this cannot be bypassed with --skip-compliance.
+
+    Rules with only a 'rule' field (no 'pattern_deny') cannot be evaluated by
+    the CLI and are reported as warnings. Use /clanet:team for full evaluation.
     """
     data = _load_constitution()
     if not data:
@@ -278,12 +301,17 @@ def _constitution_check(commands: list[str]) -> None:
 
     commands_text = "\n".join(commands)
     violations = []
+    rule_only_entries = []
 
     for _category, rule_list in rules_section.items():
         if not isinstance(rule_list, list):
             continue
         for rule in rule_list:
             if not isinstance(rule, dict):
+                continue
+            # rule-only entries (no pattern_deny) cannot be evaluated by CLI
+            if "rule" in rule and "pattern_deny" not in rule:
+                rule_only_entries.append(rule)
                 continue
             # Force scope to config_commands for evaluation
             eval_rule = {**rule, "scope": "config_commands"}
@@ -311,6 +339,17 @@ def _constitution_check(commands: list[str]) -> None:
             f"config blocked: {len(violations)} constitutional violation(s). "
             "Constitutional rules cannot be skipped."
         )
+
+    if rule_only_entries:
+        print(
+            f"[CONSTITUTION] {len(rule_only_entries)} rule(s) require LLM evaluation "
+            "(natural language 'rule' field without 'pattern_deny'). "
+            "Use /clanet:team for full constitutional compliance checking.",
+            file=sys.stderr,
+        )
+        for r in rule_only_entries:
+            print(f"  - {r.get('id', '?')} {r.get('name', 'unnamed')}",
+                  file=sys.stderr)
 
 
 def _expand_env_vars(value: str) -> str:
@@ -1246,6 +1285,10 @@ def _evaluate_rule(rule: dict, running_config: str) -> tuple[str, str]:
             return "PASS", f"pattern '{require}' found"
         return "FAIL", f"pattern '{require}' not found in running-config"
 
+    # rule-only: natural language rule requiring LLM evaluation
+    if "rule" in rule:
+        return "SKIP", "rule-only: requires LLM evaluation"
+
     return "SKIP", "no evaluation criteria defined"
 
 
@@ -1261,6 +1304,8 @@ def _evaluate_rule_for_commands(rule: dict, commands_text: str) -> tuple[str, st
 
     pattern_deny = rule.get("pattern_deny")
     if not pattern_deny:
+        if "rule" in rule:
+            return "SKIP", "rule-only: requires LLM evaluation"
         return "SKIP", "no pattern_deny defined"
 
     pattern_allow = rule.get("pattern_allow")
@@ -1297,12 +1342,17 @@ def _pre_apply_compliance(commands: list[str]) -> list[dict]:
     rules_section = policy.get("rules", {})
     commands_text = "\n".join(commands)
     violations = []
+    rule_only_entries = []
 
     for _category, rule_list in rules_section.items():
         if not isinstance(rule_list, list):
             continue
         for rule in rule_list:
             if not isinstance(rule, dict):
+                continue
+            # Collect rule-only entries for LLM warning
+            if "rule" in rule and "pattern_deny" not in rule:
+                rule_only_entries.append(rule)
                 continue
             if rule.get("scope") != "config_commands":
                 continue
@@ -1313,6 +1363,19 @@ def _pre_apply_compliance(commands: list[str]) -> list[dict]:
                     "severity": rule.get("severity", "high"),
                     "detail": detail,
                 })
+
+    if rule_only_entries:
+        print(
+            f"[POLICY] {len(rule_only_entries)} rule(s) require LLM evaluation "
+            "(natural language 'rule' field without 'pattern_deny'). "
+            "These will be evaluated by Claude in /clanet:config or by "
+            "compliance-checker in /clanet:team.",
+            file=sys.stderr,
+        )
+        for r in rule_only_entries:
+            print(f"  - {r.get('id', '?')} {r.get('name', 'unnamed')}",
+                  file=sys.stderr)
+
     return violations
 
 
@@ -1481,6 +1544,91 @@ def cmd_context(args):
         print()
 
 
+def cmd_constitution_rules(args):
+    """Print constitutional rules as JSON (for agent consumption)."""
+    data = _load_constitution()
+    if not data:
+        print(json.dumps({"constitution": None, "rules": [], "total": 0}))
+        return
+
+    all_rules = []
+    rules_section = data.get("rules", {})
+    for _category, rule_list in rules_section.items():
+        if not isinstance(rule_list, list):
+            continue
+        for rule in rule_list:
+            if isinstance(rule, dict):
+                all_rules.append(rule)
+
+    if getattr(args, "llm_only", False):
+        all_rules = [r for r in all_rules if "rule" in r]
+
+    output = {
+        "constitution": data.get("constitution"),
+        "rules": all_rules,
+        "total": len(all_rules),
+    }
+    print(json.dumps(output, ensure_ascii=False, indent=2))
+
+
+def has_policy_llm_rules() -> list[dict]:
+    """Return policy rules that have 'rule' field (LLM-evaluable)."""
+    config = get_config()
+    policy_path = config.get("policy_file") or DEFAULT_POLICY_PATH
+    try:
+        with open(policy_path) as f:
+            policy = yaml.safe_load(f)
+    except FileNotFoundError:
+        return []
+    if not isinstance(policy, dict):
+        return []
+    rules_section = policy.get("rules", {})
+    if not rules_section:
+        return []
+    result = []
+    for _category, rule_list in rules_section.items():
+        if not isinstance(rule_list, list):
+            continue
+        for rule in rule_list:
+            if isinstance(rule, dict) and "rule" in rule:
+                result.append(rule)
+    return result
+
+
+def cmd_policy_rules(args):
+    """Print policy rules as JSON (for agent consumption)."""
+    config = get_config()
+    policy_path = config.get("policy_file") or DEFAULT_POLICY_PATH
+    try:
+        with open(policy_path) as f:
+            policy = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(json.dumps({"policy": None, "rules": [], "total": 0}))
+        return
+    if not isinstance(policy, dict):
+        print(json.dumps({"policy": None, "rules": [], "total": 0}))
+        return
+
+    all_rules = []
+    rules_section = policy.get("rules", {})
+    for _category, rule_list in rules_section.items():
+        if not isinstance(rule_list, list):
+            continue
+        for rule in rule_list:
+            if isinstance(rule, dict):
+                all_rules.append(rule)
+
+    if getattr(args, "llm_only", False):
+        all_rules = [r for r in all_rules if "rule" in r]
+
+    output = {
+        "policy": policy.get("policy"),
+        "rules": all_rules,
+        "total": len(all_rules),
+    }
+    print(json.dumps(output, ensure_ascii=False, indent=2))
+
+
 # ---------------------------------------------------------------------------
 # Argument Parser
 # ---------------------------------------------------------------------------
@@ -1589,6 +1737,18 @@ def build_parser() -> argparse.ArgumentParser:
     # context
     p = sub.add_parser("context", help="Display loaded operation context")
     p.set_defaults(func=cmd_context)
+
+    # constitution-rules
+    p = sub.add_parser("constitution-rules", help="Print constitutional rules as JSON")
+    p.add_argument("--llm-only", dest="llm_only", action="store_true",
+                   help="Only show rules with 'rule' field (LLM-evaluable)")
+    p.set_defaults(func=cmd_constitution_rules)
+
+    # policy-rules
+    p = sub.add_parser("policy-rules", help="Print policy rules as JSON")
+    p.add_argument("--llm-only", dest="llm_only", action="store_true",
+                   help="Only show rules with 'rule' field (LLM-evaluable)")
+    p.set_defaults(func=cmd_policy_rules)
 
     return parser
 
