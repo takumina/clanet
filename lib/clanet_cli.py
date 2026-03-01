@@ -132,6 +132,26 @@ _CONFIG_ERROR_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"unknown command", re.IGNORECASE), "Unknown command"),
 ]
 
+# Deny patterns for show mode — block destructive/config commands
+_SHOW_DENY_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"^\s*conf(igure)?\s", re.IGNORECASE),
+     "config mode commands must use /clanet:config"),
+    (re.compile(r"^\s*reload\b", re.IGNORECASE),
+     "reload must use /clanet:cmd-interact"),
+    (re.compile(r"^\s*write\s+erase\b", re.IGNORECASE),
+     "write erase is a destructive operation"),
+    (re.compile(r"^\s*format\b", re.IGNORECASE),
+     "format is a destructive operation"),
+    (re.compile(r"^\s*delete\b", re.IGNORECASE),
+     "delete must use /clanet:cmd-interact"),
+    (re.compile(r"^\s*erase\b", re.IGNORECASE),
+     "erase is a destructive operation"),
+    (re.compile(r"^\s*request\s+(system\s+)?reboot\b", re.IGNORECASE),
+     "reboot must use /clanet:cmd-interact"),
+    (re.compile(r"^\s*copy\b", re.IGNORECASE),
+     "copy must use /clanet:cmd-interact"),
+]
+
 # Standard output directory structure
 DIRS = {
     "logs": "logs",
@@ -554,18 +574,36 @@ def cmd_info(args):
 # ---------------------------------------------------------------------------
 
 
+def _check_show_safety(commands: list[str]) -> None:
+    """Block destructive/config commands in show mode."""
+    for cmd in commands:
+        stripped = cmd.strip()
+        for pattern, reason in _SHOW_DENY_PATTERNS:
+            if pattern.search(stripped):
+                raise ConfigError(f"[BLOCKED] '{stripped}' — {reason}")
+
+
 def cmd_show(args):
     """Execute a show/operational command (single or batch mode)."""
     inv = load_inventory()
     dev = get_device(inv, args.device)
     config = get_config()
+
+    # Safety check: block destructive/config commands
+    if args.commands:
+        commands = json.loads(args.commands)
+        if not isinstance(commands, list):
+            raise ConfigError("--commands must be a JSON array")
+        _check_show_safety(commands)
+    else:
+        if not args.command:
+            raise ConfigError("command or --commands is required")
+        command = " ".join(args.command)
+        _check_show_safety([command])
+
     conn = connect(dev)
     try:
         if args.commands:
-            # バッチモード: JSON配列で複数コマンドを1接続で実行
-            commands = json.loads(args.commands)
-            if not isinstance(commands, list):
-                raise ConfigError("--commands must be a JSON array")
             for cmd in commands:
                 print(f"\n--- {cmd} ---")
                 try:
@@ -573,10 +611,6 @@ def cmd_show(args):
                 except Exception as e:
                     print(f"[WARN] {cmd}: {e}")
         else:
-            # 単一コマンドモード
-            if not args.command:
-                raise ConfigError("command or --commands is required")
-            command = " ".join(args.command)
             output = conn.send_command(command, read_timeout=config["read_timeout"])
             print(output)
     finally:
@@ -852,6 +886,34 @@ def cmd_interact(args):
     inv = load_inventory()
     dev = get_device(inv, args.device)
     commands = _validate_json_commands(args.commands)
+
+    # Extract command strings from [cmd, expect] pairs for safety checks
+    cmd_texts = []
+    for entry in commands:
+        if isinstance(entry, list) and len(entry) >= 1:
+            cmd_texts.append(entry[0])
+        elif isinstance(entry, str):
+            cmd_texts.append(entry)
+
+    # Safety gate 0: constitutional check (NEVER skippable)
+    _constitution_check(cmd_texts)
+
+    # Safety gate 1: self-lockout detection
+    _check_lockout(cmd_texts, dev["device_type"])
+
+    # Safety gate 2: compliance check (skip with --skip-compliance)
+    if not getattr(args, "skip_compliance", False):
+        violations = _pre_apply_compliance(cmd_texts)
+        if violations:
+            for v in violations:
+                print(f"[COMPLIANCE FAIL] {v['rule']} ({v['severity']}): {v['detail']}",
+                      file=sys.stderr)
+            raise ConfigError(
+                f"cmd-interact blocked: {len(violations)} compliance violation(s). "
+                "Use --skip-compliance to override (logged)."
+            )
+    else:
+        log_operation(args.device, "cmd-interact", "compliance check skipped by --skip-compliance")
 
     conn = connect(dev)
     try:
@@ -1677,6 +1739,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("cmd-interact", help="Execute interactive commands")
     p.add_argument("device")
     p.add_argument("--commands", required=True, help="JSON array of interactive commands")
+    p.add_argument("--skip-compliance", dest="skip_compliance", action="store_true",
+                   help="Skip pre-apply compliance check (logged)")
     p.set_defaults(func=cmd_interact)
 
     # syntax-help

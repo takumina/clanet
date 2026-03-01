@@ -6,7 +6,7 @@ This file provides guidance for AI assistants working on the clanet codebase.
 
 clanet is a **Claude Code plugin** for network automation, powered by [Netmiko](https://github.com/ktbyers/netmiko). It provides 15 slash commands, 4 specialized Claude Code agents, and a multi-agent team orchestration skill for safely managing network devices (Cisco IOS/XR/NX-OS, Juniper, Arista, etc.) via SSH.
 
-- **Version**: 0.2.1
+- **Version**: 0.3.0
 - **License**: MIT
 - **Author**: [takumina](https://github.com/takumina)
 - **Python**: 3.10+
@@ -232,6 +232,8 @@ Platforms requiring explicit `commit` after config changes: `cisco_xr`, `juniper
 - No external network calls — all operations are local SSH sessions
 - Config changes always require explicit human confirmation
 - HIGH/CRITICAL risk changes require device name confirmation
+- `/clanet:cmd` (show mode) blocks destructive/config commands via `_check_show_safety()` — configure, reload, write erase, delete, erase, format, copy, reboot are denied
+- `/clanet:cmd-interact` enforces the same 3-layer safety gates as `/clanet:config` — constitution, lockout, and compliance checks run before execution
 
 ## Common Patterns
 

@@ -2938,3 +2938,123 @@ class TestPolicyRulesCommand:
         parser = clanet_cli.build_parser()
         args = parser.parse_args(["policy-rules", "--llm-only"])
         assert args.llm_only is True
+
+
+# ---------------------------------------------------------------------------
+# Show Deny Patterns
+# ---------------------------------------------------------------------------
+
+
+class TestShowDenyPatterns:
+    """Tests for _check_show_safety() blocking destructive commands."""
+
+    def test_config_command_blocked(self):
+        """configure terminal should be blocked in show mode."""
+        with pytest.raises(clanet_cli.ConfigError, match="BLOCKED"):
+            clanet_cli._check_show_safety(["configure terminal"])
+
+    def test_reload_blocked(self):
+        """reload should be blocked in show mode."""
+        with pytest.raises(clanet_cli.ConfigError, match="BLOCKED"):
+            clanet_cli._check_show_safety(["reload"])
+
+    def test_write_erase_blocked(self):
+        """write erase should be blocked in show mode."""
+        with pytest.raises(clanet_cli.ConfigError, match="BLOCKED"):
+            clanet_cli._check_show_safety(["write erase"])
+
+    def test_show_command_allowed(self):
+        """Normal show commands should pass through."""
+        # Should not raise
+        clanet_cli._check_show_safety(["show ip route"])
+        clanet_cli._check_show_safety(["show version"])
+        clanet_cli._check_show_safety(["show running-config"])
+
+    def test_batch_mode_blocked(self):
+        """A batch with one bad command should be blocked."""
+        with pytest.raises(clanet_cli.ConfigError, match="BLOCKED"):
+            clanet_cli._check_show_safety([
+                "show ip route",
+                "delete flash:startup-config",
+                "show version",
+            ])
+
+
+# ---------------------------------------------------------------------------
+# Interact Safety Gates
+# ---------------------------------------------------------------------------
+
+
+class TestInteractSafetyGates:
+    """Tests for cmd_interact() safety gates (constitution, lockout, compliance)."""
+
+    @pytest.fixture
+    def constitution_file(self, tmp_path, monkeypatch):
+        """Create a constitution that blocks 'reload'."""
+        import yaml
+        data = {
+            "constitution": {"name": "test", "version": "1.0"},
+            "rules": {
+                "safety": [{
+                    "id": "CON-001",
+                    "name": "No reload",
+                    "severity": "CRITICAL",
+                    "pattern_deny": r"reload",
+                    "scope": "config_commands",
+                }],
+            },
+        }
+        f = tmp_path / "constitution.yaml"
+        f.write_text(yaml.dump(data))
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS", [str(f)])
+        return f
+
+    @pytest.fixture
+    def policy_file(self, tmp_path, monkeypatch):
+        """Create a policy that blocks 'copy' commands."""
+        import yaml
+        data = {
+            "policy": {"name": "test-policy", "version": "1.0"},
+            "rules": {
+                "safety": [{
+                    "id": "POL-001",
+                    "name": "No copy",
+                    "severity": "HIGH",
+                    "pattern_deny": r"copy\s+",
+                    "scope": "config_commands",
+                }],
+            },
+        }
+        f = tmp_path / "policy.yaml"
+        f.write_text(yaml.dump(data))
+        monkeypatch.setattr(clanet_cli, "_config", {"policy_file": str(f)})
+        return f
+
+    def test_constitution_violation_blocked(self, constitution_file):
+        """cmd_interact safety gate 0: constitution violation should block."""
+        cmd_texts = ["reload"]
+        with pytest.raises(clanet_cli.ConfigError, match="constitutional violation"):
+            clanet_cli._constitution_check(cmd_texts)
+
+    def test_lockout_blocked(self):
+        """cmd_interact safety gate 1: lockout commands should block."""
+        cmd_texts = ["interface Management0", "shutdown"]
+        with pytest.raises(clanet_cli.ConfigError, match="LOCKOUT BLOCKED"):
+            clanet_cli._check_lockout(cmd_texts, "cisco_ios")
+
+    def test_compliance_violation_blocked(self, policy_file):
+        """cmd_interact safety gate 2: compliance violation should block."""
+        cmd_texts = ["copy running-config tftp://10.0.0.1"]
+        violations = clanet_cli._pre_apply_compliance(cmd_texts)
+        assert len(violations) >= 1
+        assert "No copy" in violations[0]["rule"]
+
+    def test_skip_compliance_flag(self):
+        """cmd-interact should accept --skip-compliance flag."""
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args([
+            "cmd-interact", "router01",
+            "--commands", '[["reload", "confirm"]]',
+            "--skip-compliance",
+        ])
+        assert args.skip_compliance is True

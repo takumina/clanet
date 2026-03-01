@@ -143,15 +143,19 @@ Both `constitution.yaml` and `policy.yaml` support the same three patterns:
 
 ### Safety Gate Order
 
+The following safety gates apply to **config**, **config-load**, and **cmd-interact** subcommands:
+
 ```
 0. _constitution_check()        ← Constitutional rules (NEVER skippable)
                                    ⚠ Warns if rule-only entries exist
 1. _check_lockout()             ← Self-lockout prevention (not skippable)
 2. _pre_apply_compliance()      ← Policy compliance (--skip-compliance to override)
                                    ⚠ Warns if policy rule-only entries exist
-3. _auto_backup()               ← Auto-backup (--no-backup to skip)
+3. _auto_backup()               ← Auto-backup (--no-backup to skip, config/config-load only)
 4. send_config_set()            ← Execution
 ```
+
+Additionally, the **show** subcommand enforces `_check_show_safety()` which blocks destructive and config-mode commands (configure, reload, write erase, delete, erase, format, copy, reboot).
 
 **LLM evaluation of `rule` fields** happens at a higher layer:
 - `/clanet:config`: Claude evaluates in Step 6 (EXPLAIN phase)
