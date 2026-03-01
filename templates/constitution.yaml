@@ -1,0 +1,41 @@
+# clanet Constitution — Rules that can NEVER be skipped
+#
+# Copy this file to your project root to activate:
+#   cp templates/constitution.yaml constitution.yaml
+#
+# Search order: ./constitution.yaml → ~/.constitution.yaml
+# Commands violating these rules are blocked even with --skip-compliance.
+#
+# Rule structure:
+#   - id:           Unique identifier (CONST-XXX-NNN)
+#   - name:         Rule name
+#   - severity:     CRITICAL (only CRITICAL is supported)
+#   - reason:       Human-readable explanation of why this is blocked
+#   - pattern_deny: Regex to detect violations
+#   - pattern_allow: (optional) Exception pattern for pattern_deny
+
+constitution:
+  name: example-constitution
+  version: "1.0"
+
+rules:
+  safety:
+    - id: CONST-SAF-001
+      name: No write erase
+      severity: CRITICAL
+      reason: Destructive operation that wipes the entire device configuration.
+      pattern_deny: 'write\s+erase'
+
+    - id: CONST-SAF-002
+      name: No reload via automation
+      severity: CRITICAL
+      reason: Destructive operation that may discard unsaved changes. Reload manually.
+      pattern_deny: '^\s*reload\s*$'
+
+  security:
+    - id: CONST-SEC-001
+      name: No telnet allowed
+      severity: CRITICAL
+      reason: Telnet is unencrypted. Use SSH only.
+      pattern_deny: 'transport input.*telnet'
+      pattern_allow: 'transport input ssh'

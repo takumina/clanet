@@ -21,9 +21,14 @@ Your role is to validate proposed configuration changes against compliance polic
 
 When you receive a compliance check request from the network-operator or team lead, follow these steps in order:
 
-### Step 1: Load Policy
+### Step 1: Load Constitution and Policy
 
-Load the compliance policy in this order:
+**First, load the constitution** (absolute rules that cannot be skipped):
+1. Read `constitution.yaml` (project root) — if found, check all proposed commands
+2. If not found, check `~/.constitution.yaml`
+3. If any constitutional rule is violated → **immediately return BLOCK** (no exceptions, no overrides)
+
+Then load the compliance policy in this order:
 1. Read `.clanet.yaml` (project root) — if `policy_file` is specified, use that path
 2. If no `.clanet.yaml` or no `policy_file` key, fall back to `templates/policy.yaml`
 

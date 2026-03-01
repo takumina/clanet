@@ -4,7 +4,7 @@ argument-hint: <device-name>
 allowed-tools: [Read, Bash, Glob, Grep, AskUserQuestion]
 ---
 
-# /clanet:interactive - Interactive Commands
+# /clanet:cmd-interact - Interactive Commands
 
 Execute commands that require interactive responses (yes/no, filename, etc.).
 
@@ -20,7 +20,7 @@ Execute commands that require interactive responses (yes/no, filename, etc.).
 
 ```bash
 source .venv/bin/activate 2>/dev/null || true
-python3 lib/clanet_cli.py interact "$DEVICE_NAME" --commands "$CMD_JSON"
+python3 lib/clanet_cli.py cmd-interact "$DEVICE_NAME" --commands "$CMD_JSON"
 ```
 
 ## Examples

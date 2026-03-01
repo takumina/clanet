@@ -27,22 +27,20 @@ python3 lib/clanet_cli.py info "$ARGUMENT"
 ### Command Execution
 - `/clanet:cmd` - Execute any show/operational command
 - `/clanet:config` - Send configuration commands (with safety checks)
-- `/clanet:deploy` - Deploy configuration from a file (with safety checks)
-- `/clanet:interactive` - Execute interactive commands (yes/no prompts)
+- `/clanet:config-load` - Load configuration from a file (with safety checks)
+- `/clanet:cmd-interact` - Execute interactive commands (yes/no prompts)
 
 ### Monitoring & Operations
-- `/clanet:health` - Run health check (interfaces, BGP, OSPF)
+- `/clanet:health` - Health check (Claude selects commands and analyzes)
+- `/clanet:health-template` - Health check (template-driven commands, Claude analyzes)
 - `/clanet:backup` - Backup running configuration
-- `/clanet:session` - Check connectivity and session status
 
-### Mode & Configuration Management
-- `/clanet:mode` - Switch modes (enable, config, exit-config)
+### Configuration Management
 - `/clanet:save` - Save running config to startup
 - `/clanet:commit` - Commit changes (IOS-XR, Junos)
 
 ### Analysis & Compliance
 - `/clanet:why` - Troubleshooting (Claude diagnoses issues from device output)
-- `/clanet:validate` - Change validation (pre/post snapshot, diff, auto-rollback)
 - `/clanet:audit` - Compliance audit (security & best practices check)
 
 ### Multi-Agent Team

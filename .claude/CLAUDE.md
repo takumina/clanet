@@ -4,7 +4,7 @@ This file provides guidance for AI assistants working on the clanet codebase.
 
 ## Project Overview
 
-clanet is a **Claude Code plugin** for network automation, powered by [Netmiko](https://github.com/ktbyers/netmiko). It provides 16 slash commands, 3 specialized Claude Code agents, and a multi-agent team orchestration skill for safely managing network devices (Cisco IOS/XR/NX-OS, Juniper, Arista, etc.) via SSH.
+clanet is a **Claude Code plugin** for network automation, powered by [Netmiko](https://github.com/ktbyers/netmiko). It provides 15 slash commands, 3 specialized Claude Code agents, and a multi-agent team orchestration skill for safely managing network devices (Cisco IOS/XR/NX-OS, Juniper, Arista, etc.) via SSH.
 
 - **Version**: 0.2.1
 - **License**: MIT
@@ -19,19 +19,18 @@ clanet/
 │   └── CLAUDE.md              # Developer guide (hidden from GitHub root)
 ├── .claude-plugin/
 │   └── plugin.json            # Claude Code plugin manifest
-├── commands/                  # 16 slash command definitions (Markdown)
+├── commands/                  # 15 slash command definitions (Markdown)
 │   ├── check.md               # /clanet:check — connect and show version
 │   ├── cmd.md                 # /clanet:cmd — execute show commands
-│   ├── config.md              # /clanet:config — apply config (with safety)
-│   ├── deploy.md              # /clanet:deploy — deploy config from file
-│   ├── interactive.md         # /clanet:interactive — interactive commands
-│   ├── health.md              # /clanet:health — health check
+│   ├── config.md              # /clanet:config — config change with pre/post validation
+│   ├── config-load.md         # /clanet:config-load — load config from file
+│   ├── cmd-interact.md        # /clanet:cmd-interact — interactive commands
+│   ├── health.md              # /clanet:health — health check (Claude-driven)
+│   ├── health-template.md     # /clanet:health-template — health check (template-driven)
 │   ├── backup.md              # /clanet:backup — backup running-config
-│   ├── session.md             # /clanet:session — connectivity check
-│   ├── mode.md                # /clanet:mode — enable/config mode switching
 │   ├── save.md                # /clanet:save — write memory
 │   ├── commit.md              # /clanet:commit — commit (IOS-XR/Junos)
-│   ├── validate.md            # /clanet:validate — pre/post snapshot diff
+│   ├── config-quick.md        # /clanet:config-quick — quick config (no snapshots)
 │   ├── why.md                 # /clanet:why — network troubleshooting
 │   ├── audit.md               # /clanet:audit — compliance audit
 │   ├── team.md                # /clanet:team — multi-agent team change
@@ -49,6 +48,7 @@ clanet/
 │   ├── context.yaml           # Operation context template
 │   ├── clanet.yaml            # Plugin config (.clanet.yaml) template
 │   ├── policy.yaml            # Compliance policy rules template
+│   ├── constitution.yaml      # Constitutional rules template (unskippable)
 │   └── health.yaml            # Health check & snapshot commands (per-vendor)
 ├── tests/
 │   └── test_cli.py            # Unit tests (pytest, no network required)
@@ -63,7 +63,7 @@ clanet/
 
 ### Single CLI Engine
 
-All 16 slash commands and 3 agents delegate to `lib/clanet_cli.py`. There is no duplicated connection, parsing, or artifact logic. When adding new functionality, extend this single file rather than creating new scripts.
+All 15 slash commands and 3 agents delegate to `lib/clanet_cli.py`. There is no duplicated connection, parsing, or artifact logic. When adding new functionality, extend this single file rather than creating new scripts.
 
 ### Agent Role Separation
 
@@ -72,7 +72,7 @@ The three agents have strict boundaries:
 | Agent | Can Do | Cannot Do |
 |-------|--------|-----------|
 | **compliance-checker** | Read policies, analyze commands, send verdicts | Execute commands, connect to devices |
-| **network-operator** | Generate config, execute approved changes | Deploy without compliance PASS |
+| **network-operator** | Generate config, execute approved changes | Apply config without compliance PASS |
 | **validator** | Run show commands, compare snapshots | Make config changes |
 
 ### Safety-First Config Changes
@@ -99,7 +99,7 @@ All recoverable errors use a custom exception hierarchy rooted at `ClanetError`:
 | `InventoryNotFoundError` | `load_inventory()` |
 | `DeviceNotFoundError` | `get_device()` |
 | `DeviceConnectionError` | `connect()` |
-| `ConfigError` | `_load_health_config()`, `cmd_config()`, `cmd_deploy()`, `cmd_interact()`, `cmd_audit()` |
+| `ConfigError` | `_load_health_config()`, `cmd_config()`, `cmd_config_load()`, `cmd_interact()` (cmd-interact), `cmd_audit()` |
 
 `main()` catches `ClanetError` and converts to `sys.exit(1)`. Library consumers can catch specific exceptions without `SystemExit`.
 
@@ -171,6 +171,7 @@ All tests should pass in a clean checkout. `templates/health.yaml` ships with th
 |--------|-------------|
 | Plugin config | `./.clanet.yaml` → `~/.clanet.yaml` → built-in defaults |
 | Inventory | `inventory` key in config → `./inventory.yaml` → `~/.net-inventory.yaml` |
+| Constitution | `./constitution.yaml` → `~/.constitution.yaml` (optional, NEVER skippable) |
 | Policy | `--policy` flag → `policy_file` in config → `templates/policy.yaml` |
 | Health checks | `health_file` in config → `templates/health.yaml` |
 | Context | `context_file` in config → `./context.yaml` (optional) |

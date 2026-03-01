@@ -233,27 +233,35 @@ class TestArgParser:
         assert args.device == "router01"
         assert args.commands == '["ntp server 10.0.0.1"]'
 
-    def test_check_all(self):
-        args = self.parser.parse_args(["check", "--all"])
-        assert args.all_devices is True
+    def test_syntax_help_parser(self):
+        args = self.parser.parse_args(["syntax-help", "router01", "clock timezone"])
+        assert args.device == "router01"
+        assert args.partial_command == "clock timezone"
+        assert args.mode == "config"
+
+    def test_syntax_help_parser_exec_mode(self):
+        args = self.parser.parse_args([
+            "syntax-help", "router01", "show ip", "--mode", "exec"
+        ])
+        assert args.device == "router01"
+        assert args.partial_command == "show ip"
+        assert args.mode == "exec"
+
+    def test_syntax_help_parser_both_mode(self):
+        args = self.parser.parse_args([
+            "syntax-help", "router01", "clock timezone", "--mode", "both"
+        ])
+        assert args.device == "router01"
+        assert args.partial_command == "clock timezone"
+        assert args.mode == "both"
+
+    def test_health_commands_parser(self):
+        args = self.parser.parse_args(["health-commands", "router01"])
+        assert args.device == "router01"
 
     def test_backup_single(self):
         args = self.parser.parse_args(["backup", "router01"])
         assert args.device == "router01"
-
-    def test_session_with_action(self):
-        args = self.parser.parse_args(["session", "router01", "prompt"])
-        assert args.device == "router01"
-        assert args.action == "prompt"
-
-    def test_session_default_action(self):
-        args = self.parser.parse_args(["session", "router01"])
-        assert args.action == "status"
-
-    def test_mode_command(self):
-        args = self.parser.parse_args(["mode", "router01", "config"])
-        assert args.device == "router01"
-        assert args.action == "config"
 
     def test_snapshot_pre(self):
         args = self.parser.parse_args(["snapshot", "router01", "--phase", "pre"])
@@ -268,8 +276,8 @@ class TestArgParser:
         assert args.all_devices is True
         assert args.profile == "security"
 
-    def test_deploy_command(self):
-        args = self.parser.parse_args(["deploy", "router01", "config.cfg"])
+    def test_config_load_command(self):
+        args = self.parser.parse_args(["config-load", "router01", "config.cfg"])
         assert args.device == "router01"
         assert args.file == "config.cfg"
 
@@ -292,15 +300,15 @@ class TestResolveDeviceArg:
         self.parser = clanet_cli.build_parser()
 
     def test_all_flag(self):
-        args = self.parser.parse_args(["check", "--all"])
+        args = self.parser.parse_args(["backup", "--all"])
         assert clanet_cli._resolve_device_arg(args) == "--all"
 
     def test_device_name(self):
-        args = self.parser.parse_args(["check", "router01"])
+        args = self.parser.parse_args(["backup", "router01"])
         assert clanet_cli._resolve_device_arg(args) == "router01"
 
     def test_no_args_defaults_to_all(self):
-        args = self.parser.parse_args(["check"])
+        args = self.parser.parse_args(["backup"])
         assert clanet_cli._resolve_device_arg(args) == "--all"
 
 
@@ -844,9 +852,9 @@ class TestJsonErrorHandling:
         with pytest.raises(clanet_cli.ConfigError):
             clanet_cli.cmd_config(args)
 
-    def test_interact_invalid_json(self, mock_inventory):
+    def test_cmd_interact_invalid_json(self, mock_inventory):
         parser = clanet_cli.build_parser()
-        args = parser.parse_args(["interact", "router01", "--commands", "{bad}"])
+        args = parser.parse_args(["cmd-interact", "router01", "--commands", "{bad}"])
         with pytest.raises(clanet_cli.ConfigError):
             clanet_cli.cmd_interact(args)
 
@@ -912,6 +920,97 @@ class TestSubcommandIntegration:
         with pytest.raises(clanet_cli.ConfigError):
             clanet_cli.cmd_show(args)
 
+    def test_cmd_syntax_help_config_mode(self, patched_env, capsys, monkeypatch):
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        patched_env.read_channel.side_effect = [
+            "",  # バッファクリア（config_mode 後の残出力排除）
+            "clock timezone ?\r\n  JST  UTC 9:00\r\n  UTC  UTC 0:00\r\n"
+            "RP/0/RP0/CPU0:router(config)#clock timezone",
+            "",  # ポーリング終了（空で break）
+            "",  # Ctrl-U 後の cleanup read
+        ]
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["syntax-help", "router01", "clock timezone"])
+        clanet_cli.cmd_syntax_help(args)
+        patched_env.config_mode.assert_called_once()
+        patched_env.write_channel.assert_any_call("clock timezone ?")
+        patched_env.exit_config_mode.assert_called_once()
+        patched_env.disconnect.assert_called_once()
+        captured = capsys.readouterr()
+        result = json.loads(captured.out)
+        assert result["device"] == "router01"
+        assert result["query"] == "clock timezone"
+        assert "JST" in result["help_output"]
+        # options フィールドの検証
+        assert "options" in result
+        assert len(result["options"]) >= 2
+        names = [o["name"] for o in result["options"]]
+        assert "JST" in names
+        assert "UTC" in names
+
+    def test_cmd_syntax_help_exec_mode(self, patched_env, capsys, monkeypatch):
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        patched_env.read_channel.side_effect = [
+            "",  # バッファクリア
+            "show ip ?\r\n  route  IP routing table\r\nrouter01#show ip ",
+            "",  # ポーリング終了
+            "",  # cleanup read
+        ]
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args([
+            "syntax-help", "router01", "show ip", "--mode", "exec"
+        ])
+        clanet_cli.cmd_syntax_help(args)
+        patched_env.config_mode.assert_not_called()
+        patched_env.exit_config_mode.assert_not_called()
+        patched_env.disconnect.assert_called_once()
+        captured = capsys.readouterr()
+        result = json.loads(captured.out)
+        assert "route" in result["help_output"]
+        assert "options" in result
+        assert result["options"][0]["name"] == "route"
+
+    def test_cmd_syntax_help_both_mode(self, patched_env, capsys, monkeypatch):
+        """--mode both should return config_mode and exec_mode results."""
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        patched_env.read_channel.side_effect = [
+            # config mode run
+            "",  # バッファクリア
+            "clock ?\r\n  timezone  Configure time zone\r\n"
+            "RP/0/RP0/CPU0:router(config)#clock",
+            "",  # ポーリング終了
+            "",  # cleanup read
+            # exec mode run
+            "",  # バッファクリア
+            "clock ?\r\n  read-calendar  Read calendar\r\nrouter01#clock",
+            "",  # ポーリング終了
+            "",  # cleanup read
+        ]
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args([
+            "syntax-help", "router01", "clock", "--mode", "both"
+        ])
+        clanet_cli.cmd_syntax_help(args)
+        patched_env.config_mode.assert_called_once()
+        patched_env.exit_config_mode.assert_called_once()
+        patched_env.disconnect.assert_called_once()
+        captured = capsys.readouterr()
+        result = json.loads(captured.out)
+        assert "config_mode" in result
+        assert "exec_mode" in result
+        assert "timezone" in result["config_mode"]["help_output"]
+        assert len(result["config_mode"]["options"]) >= 1
+        assert "read-calendar" in result["exec_mode"]["help_output"]
+        assert len(result["exec_mode"]["options"]) >= 1
+
+    def test_cmd_syntax_help_disconnects_on_error(self, patched_env):
+        patched_env.config_mode.side_effect = Exception("connection error")
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["syntax-help", "router01", "clock"])
+        with pytest.raises(Exception):
+            clanet_cli.cmd_syntax_help(args)
+        patched_env.disconnect.assert_called_once()
+
     def test_cmd_info(self, patched_env, capsys):
         parser = clanet_cli.build_parser()
         args = parser.parse_args(["info", "router01"])
@@ -946,6 +1045,63 @@ class TestSubcommandIntegration:
         clanet_cli.cmd_config(args)
         mock_conn.commit.assert_called_once()
         mock_conn.exit_config_mode.assert_called_once()
+
+    def test_cmd_config_error_detected(self, patched_env, capsys, tmp_path, monkeypatch):
+        """Config with error output should print [WARN] instead of [OK]."""
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        patched_env.send_config_set.return_value = (
+            "configure terminal\n"
+            "router01(config)#clock timezone JST 9\n"
+            "                                    ^\n"
+            "% Invalid input detected at '^' marker.\n"
+        )
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args([
+            "config", "router01", "--commands", '["clock timezone JST 9"]'
+        ])
+        clanet_cli.cmd_config(args)
+        captured = capsys.readouterr()
+        assert "[OK]" not in captured.out
+        assert "[WARN]" in captured.err
+        assert "[HINT]" in captured.err
+        assert "syntax-help" in captured.err
+
+    def test_cmd_config_error_hint_partial(self, patched_env, capsys, tmp_path, monkeypatch):
+        """HINT should suggest correct partial command for syntax-help."""
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        patched_env.send_config_set.return_value = (
+            "router01(config)#clock timezone JST 9\n"
+            "% Invalid input detected at '^' marker.\n"
+        )
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args([
+            "config", "router01", "--commands", '["clock timezone JST 9"]'
+        ])
+        clanet_cli.cmd_config(args)
+        captured = capsys.readouterr()
+        assert '"clock timezone JST"' in captured.err
+
+    def test_cmd_config_load_error_detected(self, patched_env, capsys, tmp_path, monkeypatch):
+        """config-load with error output should print [WARN] instead of [OK]."""
+        monkeypatch.setattr(clanet_cli, "DIRS", {
+            "logs": str(tmp_path / "logs"),
+        })
+        config_file = tmp_path / "load.cfg"
+        config_file.write_text("clock timezone JST 9\n")
+        patched_env.send_config_from_file.return_value = (
+            "router01(config)#clock timezone JST 9\n"
+            "% Invalid input detected at '^' marker.\n"
+        )
+        parser = clanet_cli.build_parser()
+        args = parser.parse_args(["config-load", "router01", str(config_file)])
+        clanet_cli.cmd_config_load(args)
+        captured = capsys.readouterr()
+        assert "[OK]" not in captured.out
+        assert "[WARN]" in captured.err
 
     def test_cmd_backup(self, patched_env, capsys, tmp_path, monkeypatch):
         monkeypatch.setattr(clanet_cli, "DIRS", {
@@ -989,43 +1145,43 @@ class TestSubcommandIntegration:
         captured = capsys.readouterr()
         assert "No context file found" in captured.out
 
-    def test_cmd_deploy_ios(self, patched_env, capsys, tmp_path, monkeypatch):
-        """Deploy config from file to IOS device."""
+    def test_cmd_config_load_ios(self, patched_env, capsys, tmp_path, monkeypatch):
+        """config-load from file to IOS device."""
         monkeypatch.setattr(clanet_cli, "DIRS", {
             "logs": str(tmp_path / "logs"),
         })
-        config_file = tmp_path / "deploy.cfg"
+        config_file = tmp_path / "load.cfg"
         config_file.write_text("ntp server 10.0.0.1\n")
         patched_env.send_config_from_file.return_value = "config applied from file"
         parser = clanet_cli.build_parser()
-        args = parser.parse_args(["deploy", "router01", str(config_file)])
-        clanet_cli.cmd_deploy(args)
+        args = parser.parse_args(["config-load", "router01", str(config_file)])
+        clanet_cli.cmd_config_load(args)
         captured = capsys.readouterr()
         assert "[OK]" in captured.out
         patched_env.send_config_from_file.assert_called_once()
 
-    def test_cmd_deploy_xr_commits(self, mock_inventory, mock_conn, monkeypatch,
-                                    capsys, tmp_path):
-        """Deploy to IOS-XR should call commit()."""
+    def test_cmd_config_load_xr_commits(self, mock_inventory, mock_conn, monkeypatch,
+                                         capsys, tmp_path):
+        """config-load to IOS-XR should call commit()."""
         monkeypatch.setattr(clanet_cli, "connect", lambda dev: mock_conn)
         monkeypatch.setattr(clanet_cli, "DIRS", {
             "logs": str(tmp_path / "logs"),
         })
-        config_file = tmp_path / "deploy.cfg"
+        config_file = tmp_path / "load.cfg"
         config_file.write_text("router ospf 1\n")
         mock_conn.send_config_from_file.return_value = "config applied"
         parser = clanet_cli.build_parser()
-        args = parser.parse_args(["deploy", "router02", str(config_file)])
-        clanet_cli.cmd_deploy(args)
+        args = parser.parse_args(["config-load", "router02", str(config_file)])
+        clanet_cli.cmd_config_load(args)
         mock_conn.commit.assert_called_once()
         mock_conn.exit_config_mode.assert_called_once()
 
-    def test_cmd_deploy_file_not_found(self, mock_inventory, capsys):
-        """Deploy with nonexistent file should raise ConfigError."""
+    def test_cmd_config_load_file_not_found(self, mock_inventory, capsys):
+        """config-load with nonexistent file should raise ConfigError."""
         parser = clanet_cli.build_parser()
-        args = parser.parse_args(["deploy", "router01", "/nonexistent/config.cfg"])
+        args = parser.parse_args(["config-load", "router01", "/nonexistent/config.cfg"])
         with pytest.raises(clanet_cli.ConfigError):
-            clanet_cli.cmd_deploy(args)
+            clanet_cli.cmd_config_load(args)
 
     def test_cmd_save_ios(self, patched_env, capsys, tmp_path, monkeypatch):
         """Save should call save_config() for IOS devices."""
@@ -1070,44 +1226,6 @@ class TestSubcommandIntegration:
         captured = capsys.readouterr()
         assert "[SKIP]" in captured.out
 
-    def test_cmd_mode_enable(self, patched_env, capsys):
-        """Mode enable should call conn.enable()."""
-        parser = clanet_cli.build_parser()
-        args = parser.parse_args(["mode", "router01", "enable"])
-        clanet_cli.cmd_mode(args)
-        captured = capsys.readouterr()
-        assert "[OK]" in captured.out
-        patched_env.enable.assert_called_once()
-
-    def test_cmd_mode_config(self, patched_env, capsys):
-        """Mode config should call conn.config_mode()."""
-        parser = clanet_cli.build_parser()
-        args = parser.parse_args(["mode", "router01", "config"])
-        clanet_cli.cmd_mode(args)
-        captured = capsys.readouterr()
-        assert "[OK]" in captured.out
-        patched_env.config_mode.assert_called_once()
-
-    def test_cmd_mode_exit_config(self, patched_env, capsys):
-        """Mode exit-config should call conn.exit_config_mode()."""
-        parser = clanet_cli.build_parser()
-        args = parser.parse_args(["mode", "router01", "exit-config"])
-        clanet_cli.cmd_mode(args)
-        captured = capsys.readouterr()
-        assert "[OK]" in captured.out
-        patched_env.exit_config_mode.assert_called_once()
-
-    def test_cmd_mode_check(self, patched_env, capsys):
-        """Mode check should report enable/config mode status."""
-        patched_env.check_enable_mode.return_value = True
-        patched_env.check_config_mode.return_value = False
-        parser = clanet_cli.build_parser()
-        args = parser.parse_args(["mode", "router01", "check"])
-        clanet_cli.cmd_mode(args)
-        captured = capsys.readouterr()
-        assert "Enable mode: True" in captured.out
-        assert "Config mode: False" in captured.out
-
     def test_cmd_snapshot_pre(self, patched_env, capsys, tmp_path, monkeypatch):
         """Snapshot pre should save snapshot JSON."""
         monkeypatch.setattr(clanet_cli, "DIRS", {
@@ -1128,53 +1246,21 @@ class TestSubcommandIntegration:
         content = json.loads(snapshot_files[0].read_text())
         assert isinstance(content, dict)
 
-    def test_cmd_session_status(self, mock_inventory, monkeypatch, capsys):
-        """Session status should check TCP port."""
-        mock_socket = MagicMock()
-        mock_socket.connect_ex.return_value = 0
-        mock_socket.__enter__ = MagicMock(return_value=mock_socket)
-        mock_socket.__exit__ = MagicMock(return_value=False)
-
-        def mock_socket_cls(*args, **kwargs):
-            return mock_socket
-
-        monkeypatch.setattr(clanet_cli.socket, "socket", mock_socket_cls)
-        parser = clanet_cli.build_parser()
-        args = parser.parse_args(["session", "router01"])
-        clanet_cli.cmd_session(args)
-        captured = capsys.readouterr()
-        assert "[OK]" in captured.out
-        assert "SSH port open" in captured.out
-
-    def test_cmd_session_port_closed(self, mock_inventory, monkeypatch, capsys):
-        """Session should report closed port."""
-        mock_socket = MagicMock()
-        mock_socket.connect_ex.return_value = 1
-        mock_socket.__enter__ = MagicMock(return_value=mock_socket)
-        mock_socket.__exit__ = MagicMock(return_value=False)
-
-        def mock_socket_cls(*args, **kwargs):
-            return mock_socket
-
-        monkeypatch.setattr(clanet_cli.socket, "socket", mock_socket_cls)
-        parser = clanet_cli.build_parser()
-        args = parser.parse_args(["session", "router01"])
-        clanet_cli.cmd_session(args)
-        captured = capsys.readouterr()
-        assert "[FAIL]" in captured.out
-
-    def test_cmd_check_health(self, patched_env, capsys, monkeypatch):
-        """Health check should run vendor-specific commands."""
+    def test_cmd_health_commands(self, patched_env, capsys, monkeypatch):
+        """health-commands should return JSON with commands list."""
         monkeypatch.setattr(clanet_cli, "_config", {
             "health_file": None, "read_timeout": 30, "read_timeout_long": 60,
         })
         monkeypatch.chdir(Path(__file__).parent.parent)
         parser = clanet_cli.build_parser()
-        args = parser.parse_args(["check", "router01"])
-        clanet_cli.cmd_check(args)
+        args = parser.parse_args(["health-commands", "router01"])
+        clanet_cli.cmd_health_commands(args)
         captured = capsys.readouterr()
-        assert "Health Check: router01" in captured.out
-        assert "[OK]" in captured.out
+        result = json.loads(captured.out)
+        assert result["device"] == "router01"
+        assert result["device_type"] == "cisco_ios"
+        assert isinstance(result["commands"], list)
+        assert len(result["commands"]) > 0
 
     def test_cmd_audit_with_policy(self, patched_env, capsys, tmp_path, monkeypatch):
         """Audit should evaluate rules against running-config."""
@@ -1755,3 +1841,468 @@ class TestAutoBackup:
         assert result is not None
         assert "pre_change" in result
         assert Path(result).exists()
+
+
+class TestCleanHelpOutput:
+    """Tests for _clean_help_output() helper."""
+
+    def test_basic_cleaning(self):
+        raw = (
+            "clock timezone JST ?\r\n"
+            "  Asia/Tokyo  9:00 DST_ACTIV NO \r\n"
+            "  Japan       9:00 DST_ACTIV NO \r\n"
+            "RP/0/RP0/CPU0:router(config)#clock timezone JST "
+        )
+        cleaned = clanet_cli._clean_help_output(raw, "clock timezone JST")
+        assert "Asia/Tokyo" in cleaned
+        assert "Japan" in cleaned
+        assert "RP/0/RP0/CPU0" not in cleaned
+
+    def test_removes_ansi_sequences(self):
+        raw = "\x1b[4mclock\x1b[0m timezone ?\r\n  JST  UTC 9:00\r\nrouter#clock timezone "
+        cleaned = clanet_cli._clean_help_output(raw, "clock timezone")
+        assert "\x1b" not in cleaned
+        assert "JST" in cleaned
+
+    def test_empty_output(self):
+        cleaned = clanet_cli._clean_help_output("", "clock")
+        assert cleaned == ""
+
+    def test_preserves_help_content(self):
+        raw = (
+            "clock ?\r\n"
+            "  timezone  Configure time zone\r\n"
+            "RP/0/RP0/CPU0:router(config)#clock "
+        )
+        cleaned = clanet_cli._clean_help_output(raw, "clock")
+        assert "timezone" in cleaned
+        assert "Configure time zone" in cleaned
+
+
+# ---------------------------------------------------------------------------
+# Parse Help Options
+# ---------------------------------------------------------------------------
+
+
+class TestParseHelpOptions:
+    """Tests for _parse_help_options() structured output."""
+
+    def test_basic_parsing(self):
+        text = "  timezone  Configure time zone\n  ntp       NTP configuration"
+        options = clanet_cli._parse_help_options(text)
+        assert len(options) == 2
+        assert options[0] == {"name": "timezone", "description": "Configure time zone"}
+        assert options[1] == {"name": "ntp", "description": "NTP configuration"}
+
+    def test_cr_token(self):
+        options = clanet_cli._parse_help_options("  <cr>")
+        assert options == [{"name": "<cr>", "description": ""}]
+
+    def test_empty_input(self):
+        assert clanet_cli._parse_help_options("") == []
+
+    def test_multiword_description(self):
+        text = "  Asia/Tokyo  9:00 DST_ACTIV NO"
+        options = clanet_cli._parse_help_options(text)
+        assert len(options) == 1
+        assert options[0]["name"] == "Asia/Tokyo"
+        assert options[0]["description"] == "9:00 DST_ACTIV NO"
+
+    def test_no_description(self):
+        options = clanet_cli._parse_help_options("  keyword")
+        assert options == [{"name": "keyword", "description": ""}]
+
+    def test_mixed_lines(self):
+        text = "  JST  UTC 9:00\n  <cr>\n  UTC  UTC 0:00"
+        options = clanet_cli._parse_help_options(text)
+        assert len(options) == 3
+        assert options[0] == {"name": "JST", "description": "UTC 9:00"}
+        assert options[1] == {"name": "<cr>", "description": ""}
+        assert options[2] == {"name": "UTC", "description": "UTC 0:00"}
+
+
+# ---------------------------------------------------------------------------
+# Detect Config Errors
+# ---------------------------------------------------------------------------
+
+
+class TestDetectConfigErrors:
+    """Tests for _detect_config_errors() error detection."""
+
+    def test_no_errors_in_clean_output(self):
+        output = "configure terminal\nntp server 10.0.0.1\nend"
+        assert clanet_cli._detect_config_errors(output) == []
+
+    def test_invalid_input_detected(self):
+        output = (
+            "configure terminal\n"
+            "RP/0/RP0/CPU0:router(config)#clock timezone JST 9\n"
+            "                                                  ^\n"
+            "% Invalid input detected at '^' marker.\n"
+        )
+        errors = clanet_cli._detect_config_errors(output)
+        assert len(errors) == 1
+        assert errors[0]["error"] == "Invalid input detected"
+        assert "clock timezone JST 9" in errors[0]["command"]
+        assert errors[0]["partial"] == "clock timezone JST"
+
+    def test_incomplete_command(self):
+        output = (
+            "router(config)#router ospf\n"
+            "% Incomplete command.\n"
+        )
+        errors = clanet_cli._detect_config_errors(output)
+        assert len(errors) == 1
+        assert errors[0]["error"] == "Incomplete command"
+
+    def test_multiple_errors(self):
+        output = (
+            "router(config)#bad cmd1\n"
+            "% Invalid input detected at '^' marker.\n"
+            "router(config)#bad cmd2\n"
+            "% Ambiguous command: bad cmd2\n"
+        )
+        errors = clanet_cli._detect_config_errors(output)
+        assert len(errors) == 2
+
+    def test_error_with_no_preceding_command(self):
+        output = "% Error something went wrong\n"
+        errors = clanet_cli._detect_config_errors(output)
+        assert len(errors) == 1
+        assert errors[0]["command"] == ""
+        assert errors[0]["partial"] == ""
+
+    def test_prompt_stripped_from_command(self):
+        output = (
+            "RP/0/RP0/CPU0:TokyoP01(config)#clock timezone JST 9\n"
+            "% Invalid input detected at '^' marker.\n"
+        )
+        errors = clanet_cli._detect_config_errors(output)
+        assert errors[0]["command"] == "clock timezone JST 9"
+        assert errors[0]["partial"] == "clock timezone JST"
+
+
+# ---------------------------------------------------------------------------
+# Constitution loading
+# ---------------------------------------------------------------------------
+
+
+class TestConstitutionLoading:
+    """Tests for _load_constitution() file loading."""
+
+    def test_not_found_returns_none(self, monkeypatch):
+        """No constitution file should return None."""
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS",
+                            ["/nonexistent/path/constitution.yaml"])
+        assert clanet_cli._load_constitution() is None
+
+    def test_valid_file_loaded(self, tmp_path, monkeypatch):
+        """Valid constitution file should be loaded."""
+        import yaml
+        const = {
+            "constitution": {"name": "test", "version": "1.0"},
+            "rules": {
+                "safety": [{
+                    "id": "CONST-SAF-001",
+                    "name": "test rule",
+                    "severity": "CRITICAL",
+                    "reason": "test reason",
+                    "pattern_deny": "write\\s+erase",
+                }]
+            },
+        }
+        const_file = tmp_path / "constitution.yaml"
+        const_file.write_text(yaml.dump(const))
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS", [str(const_file)])
+        result = clanet_cli._load_constitution()
+        assert result is not None
+        assert result["constitution"]["name"] == "test"
+
+    def test_invalid_yaml_returns_empty(self, tmp_path, monkeypatch):
+        """Empty/invalid YAML should return empty dict, not crash."""
+        const_file = tmp_path / "constitution.yaml"
+        const_file.write_text("")
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS", [str(const_file)])
+        result = clanet_cli._load_constitution()
+        assert result == {}
+
+    def test_search_order_first_wins(self, tmp_path, monkeypatch):
+        """First found file should be used."""
+        import yaml
+        first = tmp_path / "first.yaml"
+        second = tmp_path / "second.yaml"
+        first.write_text(yaml.dump({"constitution": {"name": "first"}}))
+        second.write_text(yaml.dump({"constitution": {"name": "second"}}))
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS",
+                            [str(first), str(second)])
+        result = clanet_cli._load_constitution()
+        assert result["constitution"]["name"] == "first"
+
+
+# ---------------------------------------------------------------------------
+# Constitution check
+# ---------------------------------------------------------------------------
+
+
+class TestConstitutionCheck:
+    """Tests for _constitution_check() enforcement."""
+
+    def _make_constitution(self, tmp_path, monkeypatch, rules):
+        """Helper to set up a constitution file with given rules."""
+        import yaml
+        const = {
+            "constitution": {"name": "test", "version": "1.0"},
+            "rules": rules,
+        }
+        const_file = tmp_path / "constitution.yaml"
+        const_file.write_text(yaml.dump(const))
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS", [str(const_file)])
+
+    def test_no_file_passes(self, monkeypatch):
+        """No constitution file → no check, no error."""
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS",
+                            ["/nonexistent/path/constitution.yaml"])
+        clanet_cli._constitution_check(["write erase"])  # Should not raise
+
+    def test_violation_detected(self, tmp_path, monkeypatch):
+        """Violating command should raise ConfigError."""
+        self._make_constitution(tmp_path, monkeypatch, {
+            "safety": [{
+                "id": "CONST-SAF-002",
+                "name": "No write erase",
+                "severity": "CRITICAL",
+                "reason": "Destroys all config.",
+                "pattern_deny": r"write\s+erase",
+            }]
+        })
+        with pytest.raises(clanet_cli.ConfigError, match="constitutional violation"):
+            clanet_cli._constitution_check(["write erase"])
+
+    def test_safe_commands_pass(self, tmp_path, monkeypatch):
+        """Safe commands should pass without error."""
+        self._make_constitution(tmp_path, monkeypatch, {
+            "safety": [{
+                "id": "CONST-SAF-002",
+                "name": "No write erase",
+                "severity": "CRITICAL",
+                "reason": "Destroys all config.",
+                "pattern_deny": r"write\s+erase",
+            }]
+        })
+        clanet_cli._constitution_check(["interface Gi0/1", "description test"])
+
+    def test_pattern_allow_exception(self, tmp_path, monkeypatch):
+        """pattern_allow should override pattern_deny."""
+        self._make_constitution(tmp_path, monkeypatch, {
+            "security": [{
+                "id": "CONST-SEC-001",
+                "name": "No telnet",
+                "severity": "CRITICAL",
+                "reason": "Telnet is insecure.",
+                "pattern_deny": r"transport input.*telnet",
+                "pattern_allow": r"transport input ssh",
+            }]
+        })
+        # "transport input ssh" matches allow → should pass
+        clanet_cli._constitution_check(["transport input ssh"])
+        # "transport input telnet" → should fail
+        with pytest.raises(clanet_cli.ConfigError, match="constitutional violation"):
+            clanet_cli._constitution_check(["transport input telnet"])
+
+    def test_multiple_violations(self, tmp_path, monkeypatch, capsys):
+        """Multiple violations should all be reported."""
+        self._make_constitution(tmp_path, monkeypatch, {
+            "safety": [
+                {
+                    "id": "CONST-SAF-002",
+                    "name": "No write erase",
+                    "severity": "CRITICAL",
+                    "reason": "Destroys all config.",
+                    "pattern_deny": r"write\s+erase",
+                },
+                {
+                    "id": "CONST-SAF-003",
+                    "name": "No reload",
+                    "severity": "CRITICAL",
+                    "reason": "Unsafe reload.",
+                    "pattern_deny": r"^\s*reload\s*$",
+                },
+            ]
+        })
+        with pytest.raises(clanet_cli.ConfigError, match="2 constitutional violation"):
+            clanet_cli._constitution_check(["write erase", "reload"])
+        captured = capsys.readouterr()
+        assert "CONST-SAF-002" in captured.err
+        assert "CONST-SAF-003" in captured.err
+
+    def test_reason_displayed(self, tmp_path, monkeypatch, capsys):
+        """Reason field should be printed to stderr."""
+        self._make_constitution(tmp_path, monkeypatch, {
+            "safety": [{
+                "id": "CONST-SAF-002",
+                "name": "No write erase",
+                "severity": "CRITICAL",
+                "reason": "Destroys all config.",
+                "pattern_deny": r"write\s+erase",
+            }]
+        })
+        with pytest.raises(clanet_cli.ConfigError):
+            clanet_cli._constitution_check(["write erase"])
+        captured = capsys.readouterr()
+        assert "Destroys all config." in captured.err
+
+    def test_empty_rules_passes(self, tmp_path, monkeypatch):
+        """Constitution with empty rules section should pass."""
+        self._make_constitution(tmp_path, monkeypatch, {})
+        clanet_cli._constitution_check(["write erase"])  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# Constitution integration with cmd_config / cmd_config_load
+# ---------------------------------------------------------------------------
+
+
+class TestConstitutionIntegration:
+    """Integration tests: constitution blocks config commands."""
+
+    def _setup(self, tmp_path, monkeypatch):
+        """Set up inventory + constitution for integration tests."""
+        import yaml
+        # Inventory
+        inv = {
+            "devices": {
+                "router01": {
+                    "host": "192.168.1.1",
+                    "device_type": "cisco_ios",
+                    "username": "admin",
+                    "password": "admin",
+                }
+            }
+        }
+        inv_file = tmp_path / "inventory.yaml"
+        inv_file.write_text(yaml.dump(inv))
+        monkeypatch.setattr(clanet_cli, "INVENTORY_PATHS", [str(inv_file)])
+
+        # Constitution
+        const = {
+            "rules": {
+                "safety": [{
+                    "id": "CONST-SAF-002",
+                    "name": "No write erase",
+                    "severity": "CRITICAL",
+                    "reason": "Destroys config.",
+                    "pattern_deny": r"write\s+erase",
+                }]
+            }
+        }
+        const_file = tmp_path / "constitution.yaml"
+        const_file.write_text(yaml.dump(const))
+        monkeypatch.setattr(clanet_cli, "CONSTITUTION_PATHS", [str(const_file)])
+
+    def test_cmd_config_blocked(self, tmp_path, monkeypatch):
+        """cmd_config should be blocked by constitution."""
+        self._setup(tmp_path, monkeypatch)
+        args = argparse.Namespace(
+            device="router01",
+            commands='["write erase"]',
+            skip_compliance=False,
+            no_backup=True,
+        )
+        with pytest.raises(clanet_cli.ConfigError, match="constitutional violation"):
+            clanet_cli.cmd_config(args)
+
+    def test_cmd_config_not_skippable(self, tmp_path, monkeypatch):
+        """--skip-compliance should NOT skip constitution check."""
+        self._setup(tmp_path, monkeypatch)
+        args = argparse.Namespace(
+            device="router01",
+            commands='["write erase"]',
+            skip_compliance=True,
+            no_backup=True,
+        )
+        with pytest.raises(clanet_cli.ConfigError, match="constitutional violation"):
+            clanet_cli.cmd_config(args)
+
+    def test_cmd_config_load_blocked(self, tmp_path, monkeypatch):
+        """cmd_config_load should be blocked by constitution."""
+        self._setup(tmp_path, monkeypatch)
+        config_file = tmp_path / "bad.cfg"
+        config_file.write_text("write erase\n")
+        args = argparse.Namespace(
+            device="router01",
+            file=str(config_file),
+            skip_compliance=False,
+            no_backup=True,
+        )
+        with pytest.raises(clanet_cli.ConfigError, match="constitutional violation"):
+            clanet_cli.cmd_config_load(args)
+
+    def test_cmd_config_load_not_skippable(self, tmp_path, monkeypatch):
+        """--skip-compliance should NOT skip constitution check on config-load."""
+        self._setup(tmp_path, monkeypatch)
+        config_file = tmp_path / "bad.cfg"
+        config_file.write_text("write erase\n")
+        args = argparse.Namespace(
+            device="router01",
+            file=str(config_file),
+            skip_compliance=True,
+            no_backup=True,
+        )
+        with pytest.raises(clanet_cli.ConfigError, match="constitutional violation"):
+            clanet_cli.cmd_config_load(args)
+
+
+# ---------------------------------------------------------------------------
+# Default constitution template validation
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultConstitutionTemplate:
+    """Validate the shipped constitution template."""
+
+    def test_template_is_valid_yaml(self):
+        """templates/constitution.yaml should be valid YAML."""
+        import yaml
+        template_path = Path(__file__).parent.parent / "templates" / "constitution.yaml"
+        with open(template_path) as f:
+            data = yaml.safe_load(f)
+        assert isinstance(data, dict)
+        assert "rules" in data
+
+    def test_all_rules_have_required_fields(self):
+        """Every rule must have id, name, reason, and pattern_deny."""
+        import yaml
+        template_path = Path(__file__).parent.parent / "templates" / "constitution.yaml"
+        with open(template_path) as f:
+            data = yaml.safe_load(f)
+        for category, rule_list in data["rules"].items():
+            for rule in rule_list:
+                assert "id" in rule, f"rule in {category} missing 'id'"
+                assert "name" in rule, f"{rule.get('id', '?')} missing 'name'"
+                assert "reason" in rule, f"{rule['id']} missing 'reason'"
+                assert "pattern_deny" in rule, f"{rule['id']} missing 'pattern_deny'"
+
+    def test_all_ids_are_unique(self):
+        """Rule IDs must be globally unique."""
+        import yaml
+        template_path = Path(__file__).parent.parent / "templates" / "constitution.yaml"
+        with open(template_path) as f:
+            data = yaml.safe_load(f)
+        ids = []
+        for _category, rule_list in data["rules"].items():
+            for rule in rule_list:
+                ids.append(rule["id"])
+        assert len(ids) == len(set(ids)), f"duplicate IDs: {ids}"
+
+    def test_patterns_are_valid_regex(self):
+        """All pattern_deny and pattern_allow must be valid regex."""
+        import yaml
+        template_path = Path(__file__).parent.parent / "templates" / "constitution.yaml"
+        with open(template_path) as f:
+            data = yaml.safe_load(f)
+        import re
+        for _category, rule_list in data["rules"].items():
+            for rule in rule_list:
+                re.compile(rule["pattern_deny"])
+                if "pattern_allow" in rule:
+                    re.compile(rule["pattern_allow"])

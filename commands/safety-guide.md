@@ -7,7 +7,7 @@ allowed-tools: []
 # clanet Safety Guide
 
 **This file is NOT a user-facing command.** It is referenced by all config-changing commands
-(config, deploy, interactive, save, commit) as a shared safety framework.
+(config, config-load, cmd-interact, save, commit) as a shared safety framework.
 
 ## Safety First Philosophy
 
@@ -104,6 +104,33 @@ Post-Change Verification:
   [OK] OSPF neighbor on Gi0/0/0/0: FULL
   [OK] No errors in last 30 seconds
 ```
+
+---
+
+## Constitutional Rules
+
+**Constitutional rules are absolute and cannot be skipped.**
+
+Unlike compliance policies (which can be bypassed with `--skip-compliance`), constitutional rules defined in `constitution.yaml` are enforced unconditionally by the CLI engine. No flag, option, or override can bypass them.
+
+### How It Works
+
+1. Place `constitution.yaml` in the project root or `~/.constitution.yaml`
+2. Define rules with `pattern_deny` (and optional `pattern_allow`)
+3. The CLI checks all config commands against constitutional rules **before** any other safety gate
+4. If a violation is found, the operation is blocked with `[CONSTITUTION VIOLATION]`
+
+### Safety Gate Order
+
+```
+0. _constitution_check()        ← Constitutional rules (NEVER skippable)
+1. _check_lockout()             ← Self-lockout prevention (not skippable)
+2. _pre_apply_compliance()      ← Policy compliance (--skip-compliance to override)
+3. _auto_backup()               ← Auto-backup (--no-backup to skip)
+4. send_config_set()            ← Execution
+```
+
+See `templates/constitution.yaml` for the template and example rules.
 
 ---
 

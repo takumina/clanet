@@ -3,7 +3,7 @@
 
 All slash commands delegate to this single CLI for:
 - Inventory loading and device connection
-- Command execution (show / config / interactive)
+- Command execution (show / config / cmd-interact)
 - Health checks, backups, snapshots
 - Operation logging and artifact management
 
@@ -14,11 +14,10 @@ Subcommands:
     info      <device>                  Show device info (show version)
     show      <device> <command>        Execute a show/operational command
     config    <device> --commands JSON  Apply config commands
-    deploy    <device> <file>           Deploy config from file
-    interact  <device> --commands JSON  Interactive commands (expect patterns)
+    config-load <device> <file>          Load config from file
+    cmd-interact <device> --commands JSON Interactive commands (expect patterns)
     check     <device|--all>            Health check
     backup    <device|--all>            Backup running config
-    session   <device|--all>            Check connectivity
     mode      <device> <action>         Mode switching (enable/config/exit-config/check)
     save      <device|--all>            Save running to startup
     commit    <device|--all>            Commit (IOS-XR/Junos)
@@ -75,6 +74,7 @@ class ConfigError(ClanetError):
 # ---------------------------------------------------------------------------
 
 INVENTORY_PATHS = ["inventory.yaml", os.path.expanduser("~/.net-inventory.yaml")]
+CONSTITUTION_PATHS = ["constitution.yaml", os.path.expanduser("~/.constitution.yaml")]
 
 CONFIG_PATHS = [".clanet.yaml", os.path.expanduser("~/.clanet.yaml")]
 DEFAULT_CONFIG: dict = {
@@ -87,7 +87,6 @@ DEFAULT_CONFIG: dict = {
     "read_timeout": 30,
     "read_timeout_long": 60,
     "connect_timeout": 5,
-    "session_test_delay": 1,
 }
 
 COMMIT_PLATFORMS = {"cisco_xr", "juniper_junos"}
@@ -120,6 +119,17 @@ _LOCKOUT_STANDALONE: dict[str, list[tuple[re.Pattern, str]]] = {
          "removing routing protocol may cut management access"),
     ],
 }
+
+# Error patterns in config output (vendor-neutral)
+_CONFIG_ERROR_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"% Invalid input detected", re.IGNORECASE), "Invalid input detected"),
+    (re.compile(r"% Incomplete command", re.IGNORECASE), "Incomplete command"),
+    (re.compile(r"% Ambiguous command", re.IGNORECASE), "Ambiguous command"),
+    (re.compile(r"% Invalid command", re.IGNORECASE), "Invalid command"),
+    (re.compile(r"% Error", re.IGNORECASE), "Error in command"),
+    (re.compile(r"syntax error", re.IGNORECASE), "Syntax error"),
+    (re.compile(r"unknown command", re.IGNORECASE), "Unknown command"),
+]
 
 # Standard output directory structure
 DIRS = {
@@ -234,6 +244,73 @@ def _load_context() -> dict | None:
         except FileNotFoundError:
             continue
     return None
+
+
+def _load_constitution() -> dict | None:
+    """Load constitution rules from constitution.yaml.
+
+    Search order: ./constitution.yaml → ~/.constitution.yaml.
+    Returns None if no constitution file is found (no rules = no check).
+    """
+    for path in CONSTITUTION_PATHS:
+        try:
+            with open(path) as f:
+                data = yaml.safe_load(f) or {}
+            return data
+        except FileNotFoundError:
+            continue
+    return None
+
+
+def _constitution_check(commands: list[str]) -> None:
+    """Check commands against constitutional rules (NEVER skippable).
+
+    Raises ConfigError if any constitutional rule is violated.
+    Unlike compliance checks, this cannot be bypassed with --skip-compliance.
+    """
+    data = _load_constitution()
+    if not data:
+        return
+
+    rules_section = data.get("rules", {})
+    if not rules_section:
+        return
+
+    commands_text = "\n".join(commands)
+    violations = []
+
+    for _category, rule_list in rules_section.items():
+        if not isinstance(rule_list, list):
+            continue
+        for rule in rule_list:
+            if not isinstance(rule, dict):
+                continue
+            # Force scope to config_commands for evaluation
+            eval_rule = {**rule, "scope": "config_commands"}
+            status, detail = _evaluate_rule_for_commands(eval_rule, commands_text)
+            if status == "FAIL":
+                rule_id = rule.get("id", "UNKNOWN")
+                rule_name = rule.get("name", "unnamed")
+                reason = rule.get("reason", "").strip()
+                violations.append({
+                    "id": rule_id,
+                    "name": rule_name,
+                    "reason": reason,
+                    "detail": detail,
+                })
+
+    if violations:
+        for v in violations:
+            print(
+                f"[CONSTITUTION VIOLATION] {v['id']} {v['name']}: {v['detail']}",
+                file=sys.stderr,
+            )
+            if v["reason"]:
+                print(f"  Reason: {v['reason']}", file=sys.stderr)
+        raise ConfigError(
+            f"config blocked: {len(violations)} constitutional violation(s). "
+            "Constitutional rules cannot be skipped."
+        )
 
 
 def _expand_env_vars(value: str) -> str:
@@ -555,11 +632,53 @@ def _check_lockout(commands: list[str], device_type: str) -> None:
                 )
 
 
+def _detect_config_errors(output: str) -> list[dict]:
+    """Detect error markers in send_config_set output.
+
+    Returns a list of dicts with keys:
+      - error: the matched error description
+      - command: the command that likely caused the error (best effort)
+      - partial: the partial command for syntax-help hint (best effort)
+    """
+    errors = []
+    lines = output.splitlines()
+    for i, line in enumerate(lines):
+        for pattern, desc in _CONFIG_ERROR_PATTERNS:
+            if pattern.search(line):
+                failed_cmd = ""
+                partial = ""
+                # Look backward for the most recent command line
+                for j in range(i - 1, -1, -1):
+                    candidate = lines[j].strip()
+                    # Skip empty, error markers, and caret lines
+                    if candidate and not candidate.startswith("%") and not candidate.startswith("^"):
+                        # Strip prompt prefix (e.g., "RP/0/RP0/CPU0:router(config)#cmd")
+                        if "#" in candidate:
+                            candidate = candidate.split("#", 1)[-1].strip()
+                        elif ">" in candidate:
+                            candidate = candidate.split(">", 1)[-1].strip()
+                        if candidate:
+                            failed_cmd = candidate
+                            parts = candidate.rsplit(" ", 1)
+                            partial = parts[0] if len(parts) > 1 else candidate
+                        break
+                errors.append({
+                    "error": desc,
+                    "command": failed_cmd,
+                    "partial": partial,
+                })
+                break  # One match per line
+    return errors
+
+
 def cmd_config(args):
     """Apply configuration commands."""
     inv = load_inventory()
     dev = get_device(inv, args.device)
     commands = _validate_json_commands(args.commands)
+
+    # Safety gate 0: constitutional check (NEVER skippable)
+    _constitution_check(commands)
 
     # Safety gate 1: self-lockout detection
     _check_lockout(commands, dev["device_type"])
@@ -595,17 +714,29 @@ def cmd_config(args):
     finally:
         conn.disconnect()
 
-    log_operation(args.device, "config", "; ".join(commands))
-    print(f"\n[OK] Configuration applied to {args.device}")
+    config_errors = _detect_config_errors(output)
+    if config_errors:
+        log_operation(args.device, "config", "; ".join(commands), status="WARN")
+        for err in config_errors:
+            print(f"\n[WARN] {err['error']}: {err['command']}", file=sys.stderr)
+            if err["partial"]:
+                print(
+                    f"[HINT] Run: python3 lib/clanet_cli.py syntax-help"
+                    f" {args.device} \"{err['partial']}\"",
+                    file=sys.stderr,
+                )
+    else:
+        log_operation(args.device, "config", "; ".join(commands))
+        print(f"\n[OK] Configuration applied to {args.device}")
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: deploy
+# Subcommand: config-load
 # ---------------------------------------------------------------------------
 
 
-def cmd_deploy(args):
-    """Deploy configuration from file."""
+def cmd_config_load(args):
+    """Load configuration from file."""
     inv = load_inventory()
     dev = get_device(inv, args.device)
 
@@ -619,6 +750,9 @@ def cmd_deploy(args):
         if line.strip() and not line.strip().startswith("!")
     ]
 
+    # Safety gate 0: constitutional check (NEVER skippable)
+    _constitution_check(file_commands)
+
     # Safety gate 1: self-lockout detection
     _check_lockout(file_commands, dev["device_type"])
 
@@ -630,11 +764,11 @@ def cmd_deploy(args):
                 print(f"[COMPLIANCE FAIL] {v['rule']} ({v['severity']}): {v['detail']}",
                       file=sys.stderr)
             raise ConfigError(
-                f"deploy blocked: {len(violations)} compliance violation(s). "
+                f"config-load blocked: {len(violations)} compliance violation(s). "
                 "Use --skip-compliance to override (logged)."
             )
     else:
-        log_operation(args.device, "deploy", "compliance check skipped by --skip-compliance")
+        log_operation(args.device, "config-load", "compliance check skipped by --skip-compliance")
 
     # Safety gate 3: auto-backup
     if not getattr(args, "no_backup", False):
@@ -653,12 +787,24 @@ def cmd_deploy(args):
     finally:
         conn.disconnect()
 
-    log_operation(args.device, "deploy", f"file={args.file}")
-    print(f"\n[OK] Configuration deployed to {args.device}")
+    config_errors = _detect_config_errors(output)
+    if config_errors:
+        log_operation(args.device, "config-load", f"file={args.file}", status="WARN")
+        for err in config_errors:
+            print(f"\n[WARN] {err['error']}: {err['command']}", file=sys.stderr)
+            if err["partial"]:
+                print(
+                    f"[HINT] Run: python3 lib/clanet_cli.py syntax-help"
+                    f" {args.device} \"{err['partial']}\"",
+                    file=sys.stderr,
+                )
+    else:
+        log_operation(args.device, "config-load", f"file={args.file}")
+        print(f"\n[OK] Configuration loaded to {args.device}")
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: interact
+# Subcommand: cmd-interact
 # ---------------------------------------------------------------------------
 
 
@@ -677,6 +823,153 @@ def cmd_interact(args):
 
 
 # ---------------------------------------------------------------------------
+# Subcommand: syntax-help
+# ---------------------------------------------------------------------------
+
+
+def _clean_help_output(raw: str, partial_cmd: str) -> str:
+    """Clean raw '?' help output from a network device.
+
+    Removes ANSI escape sequences, echoed partial command lines,
+    and trailing prompt re-echo. Returns only meaningful help text.
+    """
+    # ANSIエスケープシーケンス除去
+    cleaned = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", raw)
+    # \r 除去
+    cleaned = cleaned.replace("\r", "")
+
+    lines = cleaned.split("\n")
+    result = []
+    cmd_stripped = partial_cmd.rstrip()
+    # エコーパターン: "clock ?" や "clock?" や "clock "
+    echo_patterns = {cmd_stripped + " ?", cmd_stripped + "?", cmd_stripped}
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # プロンプト付きエコー行をスキップ (例: "RP/0/RP0/CPU0:router(config)#clock ")
+        if "#" in stripped or ">" in stripped:
+            for pat in echo_patterns:
+                if stripped.endswith(pat):
+                    break
+            else:
+                result.append(line.rstrip())
+            continue
+        # エコーだけの行もスキップ
+        if stripped in echo_patterns:
+            continue
+        result.append(line.rstrip())
+    return "\n".join(result)
+
+
+def _parse_help_options(cleaned_output: str) -> list[dict]:
+    """Parse cleaned help output into structured option list.
+
+    Each option is a dict with:
+      - name: the command keyword or argument
+      - description: the help text (may be empty)
+    """
+    options = []
+    for line in cleaned_output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        match = re.match(r"^(\S+)\s{2,}(.+)$", stripped)
+        if match:
+            options.append({
+                "name": match.group(1),
+                "description": match.group(2).strip(),
+            })
+        else:
+            options.append({
+                "name": stripped,
+                "description": "",
+            })
+    return options
+
+
+def _run_syntax_help_single(conn, mode: str, partial_command: str, config: dict) -> str:
+    """Run a single syntax-help query in the specified mode.
+
+    Returns cleaned help output text.
+    """
+    if mode == "config":
+        conn.config_mode()
+
+    # バッファをクリア（config_mode 等の残出力を排除）
+    time.sleep(0.5)
+    conn.read_channel()
+
+    query = partial_command.rstrip() + " ?" if partial_command.strip() else "?"
+    conn.write_channel(query)
+
+    # ポーリングで出力を読み取り（最初は1秒待つ）
+    output = ""
+    max_wait = config["read_timeout"]
+    time.sleep(1)
+    start = time.time()
+    while (time.time() - start) < max_wait:
+        new_data = conn.read_channel()
+        if new_data:
+            output += new_data
+            time.sleep(0.5)
+        elif output:
+            break
+        else:
+            time.sleep(0.5)
+
+    # Ctrl-U でラインバッファをクリア
+    conn.write_channel("\x15")
+    time.sleep(0.5)
+    conn.read_channel()  # クリーンアップ出力を破棄
+
+    if mode == "config":
+        conn.exit_config_mode()
+
+    return _clean_help_output(output, partial_command)
+
+
+def cmd_syntax_help(args):
+    """Query context-sensitive help (?) for a partial config command.
+
+    Sends a partial command followed by '?' to the device,
+    capturing the inline help output that shows valid completions.
+    This is a read-only operation — no config changes are made.
+    """
+    inv = load_inventory()
+    dev = get_device(inv, args.device)
+    config = get_config()
+    conn = connect(dev)
+    try:
+        if args.mode == "both":
+            config_output = _run_syntax_help_single(conn, "config", args.partial_command, config)
+            exec_output = _run_syntax_help_single(conn, "exec", args.partial_command, config)
+            result = {
+                "device": args.device,
+                "query": args.partial_command,
+                "config_mode": {
+                    "help_output": config_output,
+                    "options": _parse_help_options(config_output),
+                },
+                "exec_mode": {
+                    "help_output": exec_output,
+                    "options": _parse_help_options(exec_output),
+                },
+            }
+        else:
+            cleaned = _run_syntax_help_single(conn, args.mode, args.partial_command, config)
+            result = {
+                "device": args.device,
+                "query": args.partial_command,
+                "help_output": cleaned,
+                "options": _parse_help_options(cleaned),
+            }
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    finally:
+        conn.disconnect()
+
+
+# ---------------------------------------------------------------------------
 # Subcommand: check
 # ---------------------------------------------------------------------------
 
@@ -690,37 +983,19 @@ def _resolve_device_arg(args) -> str:
     return args.device
 
 
-def cmd_check(args):
-    """Health check on device(s)."""
+def cmd_health_commands(args):
+    """Return health check commands for a device as JSON."""
     inv = load_inventory()
-    config = get_config()
-    targets = resolve_targets(inv, _resolve_device_arg(args))
+    dev = get_device(inv, args.device)
     hc = _load_health_config()
     fallback = hc.get("fallback", {}).get("health_commands", ["show ip interface brief"])
-
-    for name, dev in targets:
-        print(f"\n{'=' * DISPLAY_WIDTH}")
-        print(f"Health Check: {name} ({dev['host']})")
-        print(f"{'=' * DISPLAY_WIDTH}")
-
-        commands = hc.get("health_commands", {}).get(dev["device_type"], fallback)
-
-        try:
-            conn = connect(dev)
-            try:
-                for cmd in commands:
-                    print(f"\n--- {cmd} ---")
-                    try:
-                        print(conn.send_command(cmd, read_timeout=config["read_timeout"]))
-                    except Exception as e:
-                        print(f"[WARN] {cmd}: {e}")
-            finally:
-                conn.disconnect()
-            print(f"\n[OK] {name}: health check complete")
-        except ClanetError as e:
-            print(f"\n[FAIL] {name}: {e}")
-        except Exception as e:
-            print(f"\n[FAIL] {name}: unexpected error — {e}")
+    commands = hc.get("health_commands", {}).get(dev["device_type"], fallback)
+    result = {
+        "device": args.device,
+        "device_type": dev["device_type"],
+        "commands": commands,
+    }
+    print(json.dumps(result, indent=2))
 
 
 # ---------------------------------------------------------------------------
@@ -754,86 +1029,6 @@ def cmd_backup(args):
         except Exception as e:
             print(f"[FAIL] {name}: unexpected error — {e}")
 
-
-# ---------------------------------------------------------------------------
-# Subcommand: session
-# ---------------------------------------------------------------------------
-
-
-def cmd_session(args):
-    """Check connectivity and session status."""
-    inv = load_inventory()
-    config = get_config()
-    targets = resolve_targets(inv, _resolve_device_arg(args))
-
-    for name, dev in targets:
-        host = dev["host"]
-        port = dev.get("port", DEFAULT_SSH_PORT)
-
-        # TCP port check
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(config["connect_timeout"])
-                result = s.connect_ex((host, port))
-
-            if result == 0:
-                print(f"[OK] {name} ({host}:{port}) - SSH port open")
-            else:
-                print(f"[FAIL] {name} ({host}:{port}) - SSH port closed")
-                continue
-        except Exception as e:
-            print(f"[FAIL] {name} ({host}:{port}) - {e}")
-            continue
-
-        # Netmiko connection test (if action requires it)
-        if args.action in ("prompt", "alive"):
-            time.sleep(config["session_test_delay"])
-            try:
-                conn = connect(dev)
-                if args.action == "prompt":
-                    print(f"  Prompt: {conn.find_prompt()}")
-                elif args.action == "alive":
-                    print(f"  Alive: {conn.is_alive()}")
-                conn.disconnect()
-            except Exception as e:
-                print(f"  [WARN] Connection test failed: {e}")
-
-
-# ---------------------------------------------------------------------------
-# Subcommand: mode
-# ---------------------------------------------------------------------------
-
-
-def cmd_mode(args):
-    """Mode switching."""
-    inv = load_inventory()
-    dev = get_device(inv, args.device)
-    action = args.action
-
-    conn = connect(dev)
-    try:
-        if action == "enable":
-            conn.enable()
-            print(f"[OK] {args.device}: enable mode")
-            print(f"Prompt: {conn.find_prompt()}")
-        elif action == "config":
-            conn.config_mode()
-            print(f"[OK] {args.device}: config mode")
-            print(f"Prompt: {conn.find_prompt()}")
-        elif action == "exit-config":
-            conn.exit_config_mode()
-            print(f"[OK] {args.device}: exited config mode")
-            print(f"Prompt: {conn.find_prompt()}")
-        elif action == "check":
-            print(f"Enable mode: {conn.check_enable_mode()}")
-            print(f"Config mode: {conn.check_config_mode()}")
-            print(f"Prompt: {conn.find_prompt()}")
-        else:
-            raise ClanetError(
-                f"unknown action '{action}' (valid: enable, config, exit-config, check)"
-            )
-    finally:
-        conn.disconnect()
 
 
 # ---------------------------------------------------------------------------
@@ -1320,47 +1515,40 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Skip auto-backup before config change")
     p.set_defaults(func=cmd_config)
 
-    # deploy
-    p = sub.add_parser("deploy", help="Deploy configuration from file")
+    # config-load
+    p = sub.add_parser("config-load", help="Load configuration from file")
     p.add_argument("device")
     p.add_argument("file", help="Config file path")
     p.add_argument("--skip-compliance", dest="skip_compliance", action="store_true",
                    help="Skip pre-apply compliance check (logged)")
     p.add_argument("--no-backup", dest="no_backup", action="store_true",
                    help="Skip auto-backup before config change")
-    p.set_defaults(func=cmd_deploy)
+    p.set_defaults(func=cmd_config_load)
 
-    # interact
-    p = sub.add_parser("interact", help="Execute interactive commands")
+    # cmd-interact
+    p = sub.add_parser("cmd-interact", help="Execute interactive commands")
     p.add_argument("device")
     p.add_argument("--commands", required=True, help="JSON array of interactive commands")
     p.set_defaults(func=cmd_interact)
 
-    # check
-    p = sub.add_parser("check", help="Health check")
-    p.add_argument("device", nargs="?", default=None, help="Device name")
-    p.add_argument("--all", dest="all_devices", action="store_true", help="All devices")
-    p.set_defaults(func=cmd_check)
+    # syntax-help
+    p = sub.add_parser("syntax-help", help="Query context-sensitive help (?)")
+    p.add_argument("device")
+    p.add_argument("partial_command", help="Partial command to query")
+    p.add_argument("--mode", default="config", choices=["config", "exec", "both"],
+                   help="Mode to query in (default: config)")
+    p.set_defaults(func=cmd_syntax_help)
+
+    # health-commands
+    p = sub.add_parser("health-commands", help="List health check commands for a device")
+    p.add_argument("device")
+    p.set_defaults(func=cmd_health_commands)
 
     # backup
     p = sub.add_parser("backup", help="Backup running config")
     p.add_argument("device", nargs="?", default=None, help="Device name")
     p.add_argument("--all", dest="all_devices", action="store_true", help="All devices")
     p.set_defaults(func=cmd_backup)
-
-    # session
-    p = sub.add_parser("session", help="Check connectivity")
-    p.add_argument("device", nargs="?", default=None, help="Device name")
-    p.add_argument("--all", dest="all_devices", action="store_true", help="All devices")
-    p.add_argument("action", nargs="?", default="status",
-                   choices=["status", "prompt", "alive"])
-    p.set_defaults(func=cmd_session)
-
-    # mode
-    p = sub.add_parser("mode", help="Mode switching")
-    p.add_argument("device")
-    p.add_argument("action", choices=["enable", "config", "exit-config", "check"])
-    p.set_defaults(func=cmd_mode)
 
     # save
     p = sub.add_parser("save", help="Save running config to startup")

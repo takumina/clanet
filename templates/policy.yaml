@@ -40,26 +40,6 @@ rules:
       description: "SSH version 2 must be enabled."
       require_in_running: 'ssh.*v(ersion)?\s*2'
 
-    - id: SEC-003
-      name: No default SNMP communities
-      severity: HIGH
-      description: "SNMP community strings 'public' and 'private' are not allowed."
-      pattern_deny: 'snmp-server community (public|private)'
-
-    - id: SEC-004
-      name: VTY access control
-      severity: MEDIUM
-      description: "VTY lines should have an access-class or ACL applied."
-      require_on: 'line vty'
-      require: 'access-class'
-
-    - id: SEC-005
-      name: Console timeout
-      severity: MEDIUM
-      description: "Console line should have an exec-timeout configured."
-      require_on: 'line con'
-      require: 'exec-timeout'
-
   # === Operational Safety ===
   # Rules to prevent accidental outages
   safety:
@@ -76,21 +56,6 @@ rules:
       description: "Removing an entire routing protocol is prohibited."
       pattern_deny: 'no router (ospf|bgp|isis|eigrp)'
 
-    - id: SAF-003
-      name: No global shutdown
-      severity: CRITICAL
-      description: "Shutting down trunk or uplink interfaces is prohibited."
-      pattern_deny: 'shutdown'
-      pattern_allow: 'no shutdown'
-      scope: config_commands
-
-    - id: SAF-004
-      name: Interface description recommended
-      severity: LOW
-      description: "Interfaces being configured should have a description."
-      recommend: 'description'
-      scope: interface_config
-
   # === Standards ===
   # Baseline configuration requirements
   standards:
@@ -105,18 +70,6 @@ rules:
       severity: MEDIUM
       description: "A syslog destination must be configured."
       require_in_running: 'logging.*\d+\.\d+\.\d+\.\d+'
-
-    - id: STD-003
-      name: Login banner
-      severity: LOW
-      description: "A login banner should be configured."
-      require_in_running: 'banner'
-
-    - id: STD-004
-      name: DNS configured
-      severity: LOW
-      description: "A DNS server should be configured."
-      require_in_running: '(ip )?name.server|domain name-server'
 
 severity_levels:
   CRITICAL: "Must fix. Blocks deployment."

@@ -6,7 +6,7 @@ Network automation plugin for Claude Code. Powered by [Netmiko](https://github.c
 
 ## Features
 
-- **16 slash commands** — from `show` commands to full config deployment
+- **15 slash commands** — from `show` commands to full config deployment
 - **Risk assessment** — Claude analyzes every config change for impact before execution
 - **Self-lockout prevention** — blocks changes that would cut your SSH access
 - **Multi-agent teams** — 3 specialized agents (compliance / operator / validator) coordinate autonomously
@@ -72,23 +72,23 @@ In Claude Code, run:
 | Command | Description |
 |---------|-------------|
 | `/clanet:cmd <device> <command>` | Execute any show/operational command |
-| `/clanet:config <device>` | Send configuration commands |
-| `/clanet:deploy <device> <file>` | Deploy configuration from a file |
-| `/clanet:interactive <device>` | Execute interactive commands (yes/no prompts) |
+| `/clanet:config <device>` | Configuration change with pre/post validation and rollback |
+| `/clanet:config-quick <device>` | Quick config change without snapshots (lightweight) |
+| `/clanet:config-load <device> <file>` | Load configuration from a file |
+| `/clanet:cmd-interact <device>` | Execute interactive commands (yes/no prompts) |
 
 ### Monitoring & Operations
 
 | Command | Description |
 |---------|-------------|
-| `/clanet:health [device\|--all]` | Health check (interfaces, BGP, OSPF) |
+| `/clanet:health [device\|--all]` | Health check — Claude selects commands and analyzes results |
+| `/clanet:health-template [device\|--all]` | Health check — template-driven commands, Claude analyzes results |
 | `/clanet:backup [device\|--all]` | Backup running configuration |
-| `/clanet:session [device\|--all]` | Check connectivity and session status |
 
-### Mode & Configuration Management
+### Configuration Management
 
 | Command | Description |
 |---------|-------------|
-| `/clanet:mode <device> <action>` | Switch modes (enable, config, exit-config, check) |
 | `/clanet:save [device\|--all]` | Save running config to startup |
 | `/clanet:commit [device\|--all]` | Commit changes (IOS-XR, Junos) |
 
@@ -97,7 +97,6 @@ In Claude Code, run:
 | Command | Description |
 |---------|-------------|
 | `/clanet:why <device> <problem>` | Troubleshooting — Claude diagnoses issues from device output |
-| `/clanet:validate <device>` | Pre/post change validation with auto-rollback |
 | `/clanet:audit [device\|--all]` | Compliance audit (security & best practices) |
 
 ### Multi-Agent Team
@@ -111,11 +110,13 @@ In Claude Code, run:
 ### 1. Check device health
 
 ```bash
-# Single device
+# Claude selects commands and analyzes (recommended)
 /clanet:health router01
-
-# All devices
 /clanet:health --all
+
+# Template-driven (uses templates/health.yaml)
+/clanet:health-template router01
+/clanet:health-template --all
 ```
 
 ### 2. Run show commands
@@ -133,25 +134,25 @@ In Claude Code, run:
 
 Claude reads device state, diagnoses the root cause, and suggests a fix.
 
-### 4. Apply a config change (single command)
+### 4. Apply a config change (with validation)
 
 ```bash
 /clanet:config router01
-# Claude will ask what to configure, assess risk, and confirm before applying
+# 1. Syntax discovery (verifies commands with device)
+# 2. Takes pre-change snapshot
+# 3. Applies config (after confirmation)
+# 4. Takes post-change snapshot
+# 5. Compares and reports PASS/FAIL
+# 6. Offers rollback if FAIL
 ```
 
-### 5. Validated config change (with snapshot diff)
+For quick changes without snapshots:
 
 ```bash
-/clanet:validate router01
-# 1. Takes pre-change snapshot
-# 2. Applies config (after confirmation)
-# 3. Takes post-change snapshot
-# 4. Compares and reports PASS/FAIL
-# 5. Offers rollback if FAIL
+/clanet:config-quick router01
 ```
 
-### 6. Multi-agent team change (safest)
+### 5. Multi-agent team change (safest)
 
 ```bash
 /clanet:team router01 Set description "Uplink to core-sw01" on GigabitEthernet0/0/0/0
@@ -160,7 +161,7 @@ Claude reads device state, diagnoses the root cause, and suggests a fix.
 # validator          → verifies health after change
 ```
 
-### 7. Use operation context for complex tasks
+### 6. Use operation context for complex tasks
 
 For multi-step operations, define context upfront:
 
@@ -182,12 +183,12 @@ success_criteria:
 Then run any command as usual — clanet automatically reads the context:
 
 ```bash
-/clanet:validate router01    # Uses success_criteria for PASS/FAIL
+/clanet:config router01      # Uses success_criteria for PASS/FAIL
 /clanet:why router01 BGP down # Uses topology + symptoms for diagnosis
 /clanet:team router01 Fix BGP # All 3 agents respect constraints
 ```
 
-### 8. Compliance audit
+### 7. Compliance audit
 
 ```bash
 # Basic audit
@@ -243,7 +244,7 @@ Three specialized agents coordinate automatically:
 | Agent | Role | Hard Constraint |
 |-------|------|-----------------|
 | **compliance-checker** | Validates config against policy | NEVER executes commands. Judgment only. |
-| **network-operator** | Generates vendor-correct config and executes | NEVER deploys without compliance PASS. |
+| **network-operator** | Generates vendor-correct config and executes | NEVER applies config without compliance PASS. |
 | **validator** | Post-change health verification | NEVER makes config changes. Show commands only. |
 
 Design principles (inspired by [JANOG 57 NETCON Agent Teams](https://zenn.dev/takumina/articles/01d5d284aa5eef)):
@@ -279,7 +280,7 @@ See `templates/clanet.yaml` for a full template.
 ### Operation Context
 
 Define task-specific network topology, symptoms, constraints, and success criteria in `context.yaml`.
-When present, `/clanet:validate`, `/clanet:why`, `/clanet:health`, and `/clanet:team` automatically reference it.
+When present, `/clanet:config`, `/clanet:why`, `/clanet:health`, and `/clanet:team` automatically reference it.
 
 ```bash
 cp templates/context.yaml context.yaml
@@ -304,13 +305,13 @@ success_criteria:
 | `topology` | `/clanet:why`, network-operator |
 | `symptoms` | `/clanet:why` |
 | `constraints` | compliance-checker, network-operator |
-| `success_criteria` | `/clanet:validate`, `/clanet:health`, validator |
+| `success_criteria` | `/clanet:config`, `/clanet:health`, validator |
 
 To use a custom path, set `context_file` in `.clanet.yaml`.
 
 ### Custom Health Check Commands
 
-Commands executed by `/clanet:health` and `/clanet:snapshot` are defined in `templates/health.yaml`.
+Commands executed by `/clanet:health-template` and `/clanet:snapshot` are defined in `templates/health.yaml`.
 Customize freely (e.g., remove OSPF checks, add MPLS checks) without code changes.
 
 ```bash
@@ -371,7 +372,7 @@ devices:
 ```
 clanet/
 ├── .claude-plugin/plugin.json    # Plugin manifest
-├── commands/                     # 16 slash commands
+├── commands/                     # 15 slash commands
 ├── agents/                       # 3 specialized agents
 ├── skills/team/SKILL.md          # Multi-agent orchestration skill
 ├── lib/clanet_cli.py             # Common CLI engine (single source of truth)
@@ -385,7 +386,7 @@ clanet/
 └── requirements.txt              # Python dependencies
 ```
 
-All 16 commands and 3 agents share `lib/clanet_cli.py` — no duplicated connection or parsing logic.
+All 15 commands and 3 agents share `lib/clanet_cli.py` — no duplicated connection or parsing logic.
 
 ### What clanet builds vs. what Claude provides
 

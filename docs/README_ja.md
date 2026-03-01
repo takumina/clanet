@@ -72,23 +72,23 @@ Claude Code 内で以下を実行:
 | コマンド | 説明 |
 |---------|------|
 | `/clanet:cmd <device> <command>` | show / 運用コマンドを実行 |
-| `/clanet:config <device>` | コンフィグコマンドを投入 |
-| `/clanet:deploy <device> <file>` | ファイルからコンフィグを投入 |
-| `/clanet:interactive <device>` | 対話型コマンドを実行（yes/no プロンプト対応） |
+| `/clanet:config <device>` | Pre/Post 検証付きの設定変更（ロールバック対応） |
+| `/clanet:config-quick <device>` | スナップショットなしの軽量設定変更 |
+| `/clanet:config-load <device> <file>` | ファイルからコンフィグを読み込み |
+| `/clanet:cmd-interact <device>` | 対話型コマンドを実行（yes/no プロンプト対応） |
 
 ### 監視・運用
 
 | コマンド | 説明 |
 |---------|------|
-| `/clanet:health [device\|--all]` | ヘルスチェック（インターフェース、BGP、OSPF） |
+| `/clanet:health [device\|--all]` | ヘルスチェック — Claude がコマンドを選択して分析 |
+| `/clanet:health-template [device\|--all]` | ヘルスチェック — テンプレートのコマンドを実行、Claude が分析 |
 | `/clanet:backup [device\|--all]` | running-config のバックアップ |
-| `/clanet:session [device\|--all]` | 接続性・セッション状態を確認 |
 
-### モード・設定管理
+### 設定管理
 
 | コマンド | 説明 |
 |---------|------|
-| `/clanet:mode <device> <action>` | モード切替（enable, config, exit-config, check） |
 | `/clanet:save [device\|--all]` | running-config を startup に保存 |
 | `/clanet:commit [device\|--all]` | 変更をコミット（IOS-XR, Junos） |
 
@@ -97,7 +97,6 @@ Claude Code 内で以下を実行:
 | コマンド | 説明 |
 |---------|------|
 | `/clanet:why <device> <problem>` | トラブルシューティング — Claude がデバイス出力から問題を診断 |
-| `/clanet:validate <device>` | Pre/Post 検証と自動ロールバック |
 | `/clanet:audit [device\|--all]` | コンプライアンス監査（セキュリティ・ベストプラクティス） |
 
 ### マルチエージェントチーム
@@ -111,11 +110,13 @@ Claude Code 内で以下を実行:
 ### 1. デバイスのヘルスチェック
 
 ```bash
-# 単一デバイス
+# Claude がコマンドを選択して分析（推奨）
 /clanet:health router01
-
-# 全デバイス
 /clanet:health --all
+
+# テンプレート駆動（templates/health.yaml を使用）
+/clanet:health-template router01
+/clanet:health-template --all
 ```
 
 ### 2. show コマンドの実行
@@ -133,25 +134,25 @@ Claude Code 内で以下を実行:
 
 Claude がデバイスの状態を読み取り、根本原因を診断し、修正案を提示します。
 
-### 4. コンフィグ変更（単発）
+### 4. コンフィグ変更（Pre/Post 検証付き）
 
 ```bash
 /clanet:config router01
-# Claude が設定内容を確認 → リスク評価 → 承認確認 → 適用
+# 1. 構文検証（デバイスの ? ヘルプで確認）
+# 2. 変更前スナップショット取得
+# 3. コンフィグ適用（承認後）
+# 4. 変更後スナップショット取得
+# 5. 差分比較して PASS/FAIL 判定
+# 6. FAIL の場合ロールバックを提案
 ```
 
-### 5. Pre/Post 検証付きコンフィグ変更
+スナップショットなしの軽量版:
 
 ```bash
-/clanet:validate router01
-# 1. 変更前スナップショット取得
-# 2. コンフィグ適用（承認後）
-# 3. 変更後スナップショット取得
-# 4. 差分比較して PASS/FAIL 判定
-# 5. FAIL の場合ロールバックを提案
+/clanet:config-quick router01
 ```
 
-### 6. マルチエージェントチーム（最も安全）
+### 5. マルチエージェントチーム（最も安全）
 
 ```bash
 /clanet:team router01 GigabitEthernet0/0/0/0 に description "Uplink to core-sw01" を設定
@@ -160,7 +161,7 @@ Claude がデバイスの状態を読み取り、根本原因を診断し、修�
 # validator          → 変更後のヘルスチェック
 ```
 
-### 7. 運用コンテキストの活用
+### 6. 運用コンテキストの活用
 
 複数ステップの作業では、事前にコンテキストを定義できます:
 
@@ -182,12 +183,12 @@ success_criteria:
 コンテキストを定義すると、各コマンドが自動的に参照します:
 
 ```bash
-/clanet:validate router01    # success_criteria で PASS/FAIL 判定
+/clanet:config router01      # success_criteria で PASS/FAIL 判定
 /clanet:why router01 BGP down # topology + symptoms で診断
 /clanet:team router01 Fix BGP # 3 エージェントが constraints を遵守
 ```
 
-### 8. コンプライアンス監査
+### 7. コンプライアンス監査
 
 ```bash
 # 基本監査
@@ -279,7 +280,7 @@ auto_backup: true
 ### 運用コンテキスト
 
 `context.yaml` でタスク固有のネットワーク構成、症状、制約、成功条件を定義できます。
-定義すると、`/clanet:validate`、`/clanet:why`、`/clanet:health`、`/clanet:team` が自動的に参照します。
+定義すると、`/clanet:config`、`/clanet:why`、`/clanet:health`、`/clanet:team` が自動的に参照します。
 
 ```bash
 cp templates/context.yaml context.yaml
@@ -304,11 +305,11 @@ success_criteria:
 | `topology` | `/clanet:why`, network-operator |
 | `symptoms` | `/clanet:why` |
 | `constraints` | compliance-checker, network-operator |
-| `success_criteria` | `/clanet:validate`, `/clanet:health`, validator |
+| `success_criteria` | `/clanet:config`, `/clanet:health`, validator |
 
 ### カスタムヘルスチェックコマンド
 
-`/clanet:health` と `/clanet:snapshot` で実行されるコマンドは `templates/health.yaml` で定義されています。
+`/clanet:health-template` と `/clanet:snapshot` で実行されるコマンドは `templates/health.yaml` で定義されています。
 コード変更なしで自由にカスタマイズできます（例: OSPF チェックの削除、MPLS チェックの追加）。
 
 ```bash

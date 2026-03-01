@@ -1,18 +1,18 @@
 ---
-description: Deploy configuration from a file to a network device (with safety checks)
+description: Load configuration from a file to a network device (with safety checks)
 argument-hint: <device-name> <config-file>
 allowed-tools: [Read, Bash, Glob, Grep, AskUserQuestion]
 ---
 
-# /clanet:deploy - Deploy Configuration from File
+# /clanet:config-load - Load Configuration from File
 
-Deploy configuration from a file to a device.
+Load configuration from a file to a device.
 **Follows the clanet Safety Guide: Show → Explain → Confirm → Verify.**
 
 ## Instructions
 
 1. Parse the argument: device name and config file path.
-   - Example: `/clanet:deploy router01 configs/bgp_update.cfg`
+   - Example: `/clanet:config-load router01 configs/bgp_update.cfg`
 
 2. Get device info:
 
@@ -25,7 +25,7 @@ python3 lib/clanet_cli.py device-info "$DEVICE_NAME"
 
    ```
    +----------------------------------------------------------+
-   |  clanet: File Deployment Request                          |
+   |  clanet: Config Load Request                              |
    +----------------------------------------------------------+
    |  Device:    <name> (<host>)                              |
    |  Type:      <device_type>                                |
@@ -48,14 +48,17 @@ python3 lib/clanet_cli.py device-info "$DEVICE_NAME"
    - For LOW/MEDIUM: [Apply + Verify] / [Apply] / [Cancel]
    - For HIGH/CRITICAL: Show explicit warning, require device name confirmation
 
-6. **EXECUTE** - Deploy the file:
+6. **EXECUTE** - Load the config file:
+
+   > **Note:** 憲法ルール (`constitution.yaml`) は CLI が自動的に強制します。
+   > 違反するコマンドは `--skip-compliance` を付けてもブロックされます。
 
 ```bash
 source .venv/bin/activate 2>/dev/null || true
-python3 lib/clanet_cli.py deploy "$DEVICE_NAME" "$CONFIG_FILE"
+python3 lib/clanet_cli.py config-load "$DEVICE_NAME" "$CONFIG_FILE"
 ```
 
-7. **VERIFY** - After deployment:
+7. **VERIFY** - After loading:
 
 ```bash
 source .venv/bin/activate 2>/dev/null || true

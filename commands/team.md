@@ -123,7 +123,7 @@ If any phase failed:
 or
 ```
 **Overall: FAILED** (validation detected issues)
-Recommend: `/clanet:validate <device>` for rollback
+Recommend: `/clanet:config <device>` for rollback
 ```
 
 ### Step 5: Cleanup

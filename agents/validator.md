@@ -116,5 +116,5 @@ VALIDATION RESULT: FAIL
 
 **Action Required:**
 - Recommend immediate rollback
-- Suggest: `/clanet:validate <device>` for full rollback workflow
+- Suggest: `/clanet:config <device>` for full rollback workflow
 ```
