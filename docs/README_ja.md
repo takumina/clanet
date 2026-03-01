@@ -9,7 +9,7 @@
 - **15 のスラッシュコマンド** — show コマンドからコンフィグ投入まで
 - **リスク評価** — 設定変更前に Claude が影響度を分析
 - **自己ロックアウト防止** — SSH アクセスを遮断する変更を自動検知・ブロック
-- **マルチエージェント** — 4 つの専門エージェント（プランナー / コンプライアンス / オペレータ / バリデータ）が動的スケーリングで自律連携
+- **マルチエージェント** — 4 つの専門エージェント（プランナー / コンプライアンス / オペレータ / バリデータ）が、動的にスケーリングしながら連携
 - **憲法ルール** — `--skip-compliance` でもスキップ不可の絶対的安全ルール
 - **コンプライアンス監査** — 正規表現 + 自然言語（LLM 評価）のカスタマイズ可能なポリシールール
 - **Pre/Post 検証** — 変更前後のスナップショット自動取得と差分比較
@@ -32,13 +32,13 @@ pip install -r requirements.txt
 cp templates/inventory.yaml inventory.yaml
 ```
 
-`inventory.yaml` を開いて、自分のデバイス情報（host, username, password, device_type）を入力します:
+`inventory.yaml` を開いて、デバイス情報（`host`, `username`, `password`, `device_type`）を入力します。
 
 ```bash
 nano inventory.yaml
 ```
 
-> **セキュリティ推奨**: パスワードは `${ENV_VAR}` 形式で環境変数から読み込めます。詳しくは「[インベントリ形式](#インベントリ形式)」を参照してください。
+> **セキュリティ推奨**: パスワードは `${ENV_VAR}` 形式で環境変数から読み込めます。詳しくは「[セキュリティに関する注意事項](#セキュリティに関する注意事項)」を参照してください。
 
 **ステップ 3** — Claude Code を起動してプラグインをインストール
 
@@ -73,10 +73,10 @@ Claude Code 内で以下を実行:
 | コマンド | 説明 |
 |---------|------|
 | `/clanet:cmd <device> <command>` | show / 運用コマンドを実行 |
+| `/clanet:cmd-interact <device>` | 対話型コマンドを実行（yes/no プロンプト対応） |
 | `/clanet:config <device>` | Pre/Post 検証付きの設定変更（ロールバック対応） |
 | `/clanet:config-quick <device>` | スナップショットなしの軽量設定変更 |
 | `/clanet:config-load <device> <file>` | ファイルからコンフィグを読み込み |
-| `/clanet:cmd-interact <device>` | 対話型コマンドを実行（yes/no プロンプト対応） |
 
 ### 監視・運用
 
@@ -84,12 +84,12 @@ Claude Code 内で以下を実行:
 |---------|------|
 | `/clanet:health [device\|--all]` | ヘルスチェック — Claude がコマンドを選択して分析 |
 | `/clanet:health-template [device\|--all]` | ヘルスチェック — テンプレートのコマンドを実行、Claude が分析 |
-| `/clanet:backup [device\|--all]` | running-config のバックアップ |
 
-### 設定管理
+### その他
 
 | コマンド | 説明 |
 |---------|------|
+| `/clanet:backup [device\|--all]` | running-config をバックアップ |
 | `/clanet:save [device\|--all]` | running-config を startup に保存 |
 | `/clanet:commit [device\|--all]` | 変更をコミット（IOS-XR, Junos） |
 
@@ -167,7 +167,7 @@ Claude がデバイスの状態を読み取り、根本原因を診断し、修�
 
 ```bash
 /clanet:team all すべての WAN インターフェースの OSPF コストを 100 に変更
-# デバイス数に基づいて 1-4 のオペレータを並列実行
+# デバイス数に基づいて 1〜4 のオペレータを並列実行
 ```
 
 ### 6. 運用コンテキストの活用
@@ -228,7 +228,7 @@ success_criteria:
 
 ## マルチエージェントモード
 
-複雑な操作では、`/clanet:team` が 4 つの専門エージェントを動的オペレータスケーリングで連携させます:
+複雑な操作では、`/clanet:team` が 4 つの専門エージェントを、オペレータを動的にスケーリングしながら連携させます:
 
 ```bash
 /clanet:team router01 GigabitEthernet0/0/0/0 に description "Uplink to core-sw01" を設定
@@ -261,7 +261,7 @@ Phase 2（動的スケーリング）:
 |------------|------|---------|
 | **planner** | 状態調査、計画作成、手順書作成 | コンフィグコマンドの実行は禁止。 |
 | **compliance-checker** | ポリシーに基づく設定検証（正規表現 + LLM） | コマンド実行は禁止。判定のみ。 |
-| **network-operator** | ベンダー正確なコンフィグ生成・実行 | 計画 + コンプライアンス PASS + 人間の承認なしでは実行禁止。 |
+| **network-operator** | ベンダーごとに正しいコンフィグを生成・実行 | 計画 + コンプライアンス PASS + 人間の承認なしでは実行禁止。 |
 | **validator** | 変更後のヘルス検証 | 設定変更は禁止。show コマンドのみ。 |
 
 ### 動的オペレータスケーリング
@@ -276,14 +276,14 @@ Phase 2（動的スケーリング）:
 
 ### 二層コンプライアンス
 
-compliance-checker は 2 つのレイヤーでルールを評価します:
+compliance-checker は 2 層でルールを評価します:
 
 | レイヤー | ルール種別 | 評価者 |
 |---------|-----------|--------|
 | **正規表現** | `pattern_deny`, `require` など | CLI エンジン（自動） |
 | **セマンティック** | 自然言語 `rule` フィールド | LLM 推論（compliance-checker） |
 
-設計思想（[JANOG 57 NETCON エージェントチーム](https://zenn.dev/takumina/articles/01d5d284aa5eef) に着想を得ています）:
+設計思想（[JANOG 57 NETCON エージェントチーム](https://zenn.dev/takumina/articles/01d5d284aa5eef) に着想を得た考え方）:
 - **役割分離による安全性** — 各エージェントが実行できる操作を厳密に制限
 - **自律ワークフロー** — エージェント間は SendMessage で通信、手動の調整は不要
 - **手順書** — Planner が実行前に Markdown の手順書を作成
@@ -406,16 +406,7 @@ rules:
 
 ## 対応ベンダー
 
-[Netmiko](https://github.com/ktbyers/netmiko) を使用。[対応プラットフォーム一覧](https://github.com/ktbyers/netmiko/blob/develop/PLATFORMS.md):
-
-| ベンダー | device_type | テスト済 |
-|---------|-------------|---------|
-| Cisco IOS | `cisco_ios` | - |
-| Cisco IOS-XR | `cisco_xr` | Yes |
-| Cisco NX-OS | `cisco_nxos` | - |
-| Juniper Junos | `juniper_junos` | - |
-| Arista EOS | `arista_eos` | - |
-| その他多数 | [一覧](https://github.com/ktbyers/netmiko/blob/develop/PLATFORMS.md) | - |
+Netmiko に対応しているもの。
 
 ## インベントリ形式
 
@@ -469,7 +460,7 @@ clanet/
 └── requirements.txt              # Python 依存パッケージ
 ```
 
-全 15 コマンドと 4 エージェントが `lib/clanet_cli.py` を共有 — 接続・パースロジックの重複はゼロです。
+全 15 コマンドと 4 エージェントが `lib/clanet_cli.py` を共有し、接続・パースロジックの重複を排除しています。
 
 ### clanet の実装と Claude の役割
 
@@ -489,7 +480,7 @@ clanet は Claude Code プラグインです。プロンプト設計とツール
 - **環境変数**: `inventory.yaml` 内で `${VAR_NAME}` 構文を使用してパスワードやユーザー名を指定できます（例: `password: ${NET_PASSWORD}`）。平文での保存を回避できます。
 - **SSH のみ**: すべてのデバイス通信は Netmiko 経由の SSH です。Telnet や HTTP は使用しません。
 - **外部通信なし**: clanet は外部サービスへのデータ送信を一切行いません。すべての操作はローカルの SSH セッションです。
-- **Human-in-the-loop**: コンフィグ変更には必ず人間の明示的な承認が必要です。Claude はリスクを評価しますが、HIGH/CRITICAL の変更を自動適用することはありません。
+- **人間の承認プロセス**: コンフィグ変更には必ず人間の明示的な承認が必要です。Claude はリスクを評価しますが、HIGH/CRITICAL の変更を自動適用することはありません。
 - **監査証跡**: すべてのコンフィグ操作がタイムスタンプ・デバイス名・アクション・ステータスとともに `logs/clanet_operations.log` に記録されます。
 
 ## トラブルシューティング
@@ -506,13 +497,12 @@ clanet は Claude Code プラグインです。プロンプト設計とツール
 ## 要件
 
 - Python 3.10+
-- Netmiko (`pip install netmiko`)
-- PyYAML (`pip install pyyaml`)
+- 依存パッケージ: `pip install -r requirements.txt`（Netmiko, PyYAML）
 - ネットワークデバイスへの SSH アクセス
 
 ## 作者
 
-Created by [takumina](https://github.com/takumina)
+[takumina](https://github.com/takumina) 作成
 
 ## ライセンス
 

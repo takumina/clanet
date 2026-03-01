@@ -1,6 +1,6 @@
 # clanet - Network Automation for Claude Code
 
-Network automation plugin for Claude Code. Powered by [Netmiko](https://github.com/ktbyers/netmiko).
+A network automation plugin for Claude Code, powered by [Netmiko](https://github.com/ktbyers/netmiko).
 
 **English** | [日本語](docs/README_ja.md)
 
@@ -32,7 +32,7 @@ pip install -r requirements.txt
 cp templates/inventory.yaml inventory.yaml
 ```
 
-Edit `inventory.yaml` with your device info (host, username, password, device_type):
+Edit `inventory.yaml` with your device information (`host`, `username`, `password`, `device_type`):
 
 ```bash
 nano inventory.yaml
@@ -73,10 +73,10 @@ In Claude Code, run:
 | Command | Description |
 |---------|-------------|
 | `/clanet:cmd <device> <command>` | Execute any show/operational command |
+| `/clanet:cmd-interact <device>` | Execute interactive commands (yes/no prompts) |
 | `/clanet:config <device>` | Configuration change with pre/post validation and rollback |
 | `/clanet:config-quick <device>` | Quick config change without snapshots (lightweight) |
 | `/clanet:config-load <device> <file>` | Load configuration from a file |
-| `/clanet:cmd-interact <device>` | Execute interactive commands (yes/no prompts) |
 
 ### Monitoring & Operations
 
@@ -84,12 +84,12 @@ In Claude Code, run:
 |---------|-------------|
 | `/clanet:health [device\|--all]` | Health check — Claude selects commands and analyzes results |
 | `/clanet:health-template [device\|--all]` | Health check — template-driven commands, Claude analyzes results |
-| `/clanet:backup [device\|--all]` | Backup running configuration |
 
-### Configuration Management
+### Other
 
 | Command | Description |
 |---------|-------------|
+| `/clanet:backup [device\|--all]` | Backup running configuration |
 | `/clanet:save [device\|--all]` | Save running config to startup |
 | `/clanet:commit [device\|--all]` | Commit changes (IOS-XR, Junos) |
 
@@ -139,7 +139,7 @@ Claude reads device state, diagnoses the root cause, and suggests a fix.
 
 ```bash
 /clanet:config router01
-# 1. Syntax discovery (verifies commands with device)
+# 1. Syntax discovery (verifies commands on the device)
 # 2. Takes pre-change snapshot
 # 3. Applies config (after confirmation)
 # 4. Takes post-change snapshot
@@ -193,8 +193,8 @@ Then run any command as usual — clanet automatically reads the context:
 
 ```bash
 /clanet:config router01      # Uses success_criteria for PASS/FAIL
-/clanet:why router01 BGP down # Uses topology + symptoms for diagnosis
-/clanet:team router01 Fix BGP # All agents respect constraints
+/clanet:why router01 BGP down  # Uses topology + symptoms for diagnosis
+/clanet:team router01 Fix BGP  # All agents respect constraints
 ```
 
 ### 7. Compliance audit
@@ -261,7 +261,7 @@ Phase 2 (dynamic):
 |-------|------|-----------------|
 | **planner** | Investigates state, designs plan, creates procedure docs | NEVER executes config commands. |
 | **compliance-checker** | Validates config against policy (regex + LLM) | NEVER executes commands. Judgment only. |
-| **network-operator** | Generates vendor-correct config and executes | NEVER applies without plan + compliance PASS + human approval. |
+| **network-operator** | Generates vendor-correct config and executes it | NEVER applies without plan + compliance PASS + human approval. |
 | **validator** | Post-change health verification | NEVER makes config changes. Show commands only. |
 
 ### Dynamic Operator Scaling
@@ -408,16 +408,7 @@ rules:
 
 ## Supported Vendors
 
-Powered by [Netmiko](https://github.com/ktbyers/netmiko). See [supported platforms](https://github.com/ktbyers/netmiko/blob/develop/PLATFORMS.md) for the full list:
-
-| Vendor | device_type | Tested |
-|--------|-------------|--------|
-| Cisco IOS | `cisco_ios` | - |
-| Cisco IOS-XR | `cisco_xr` | Yes |
-| Cisco NX-OS | `cisco_nxos` | - |
-| Juniper Junos | `juniper_junos` | - |
-| Arista EOS | `arista_eos` | - |
-| And many more... | [Full list](https://github.com/ktbyers/netmiko/blob/develop/PLATFORMS.md) | - |
+Anything supported by Netmiko.
 
 ## Inventory Format
 
@@ -471,7 +462,7 @@ clanet is a Claude Code plugin — it structures prompts and orchestrates tools 
 
 ## Security Considerations
 
-- **Credentials**: `inventory.yaml` contains device credentials and is gitignored by default. Never commit it.
+- **Credentials**: `inventory.yaml` contains device credentials and is ignored by git by default. Never commit it.
 - **Environment variables**: Use `${VAR_NAME}` syntax in `inventory.yaml` for passwords and usernames (e.g., `password: ${NET_PASSWORD}`). This avoids storing credentials in plain text.
 - **SSH only**: All device communication uses SSH via Netmiko. No telnet, no HTTP.
 - **No external calls**: clanet does not phone home or send data to any external service. All operations are local SSH sessions.
@@ -492,7 +483,7 @@ clanet is a Claude Code plugin — it structures prompts and orchestrates tools 
 ## Requirements
 
 - Python 3.10+
-- Dependencies: `pip install -r requirements.txt` (Netmiko, PyYAML)
+- Install dependencies: `pip install -r requirements.txt` (includes Netmiko and PyYAML)
 - SSH access to network devices
 
 ## Author
