@@ -468,6 +468,17 @@ clanet is a Claude Code plugin — it structures prompts and orchestrates tools 
 - **No external calls**: clanet does not phone home or send data to any external service. All operations are local SSH sessions.
 - **Human-in-the-loop**: Config changes always require explicit user confirmation. Claude assesses risk but never auto-applies HIGH/CRITICAL changes.
 - **Audit trail**: Every config operation is logged to `logs/clanet_operations.log` with timestamp, device, action, and status.
+- **Pre-push hook**: A git hook in `.githooks/pre-push` automatically blocks pushes containing hardcoded passwords, private keys, credential files, or sensitive data. Enable it with:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook checks for:
+1. Hardcoded passwords, API keys, and private keys
+2. Private IP addresses (RFC1918) outside templates/tests
+3. Large files (>500KB)
+4. Sensitive files (inventory.yaml, .env, .pem, etc.)
 
 ## Troubleshooting
 

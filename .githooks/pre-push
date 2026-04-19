@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+#
+# clanet pre-push hook
+# push前に機密情報の混入をチェックしてブロックする
+#
+# 有効化: git config core.hooksPath .githooks
+#
+
+set -euo pipefail
+
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+ERRORS=0
+WARNINGS=0
+
+echo "============================================"
+echo " clanet pre-push security check"
+echo "============================================"
+echo ""
+
+# pushされるコミット範囲を取得
+while read local_ref local_sha remote_ref remote_sha; do
+    if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+        # 新しいブランチ: 全ファイルをチェック
+        DIFF_TARGET="$local_sha"
+        FILES=$(git diff --name-only --diff-filter=ACMR $(git hash-object -t tree /dev/null) "$local_sha" 2>/dev/null || git ls-tree -r --name-only "$local_sha")
+    else
+        # 既存ブランチ: 差分のみチェック
+        DIFF_TARGET="$local_sha"
+        FILES=$(git diff --name-only --diff-filter=ACMR "$remote_sha" "$local_sha" 2>/dev/null || echo "")
+    fi
+done
+
+if [ -z "${FILES:-}" ]; then
+    echo -e "${GREEN}[OK]${NC} 変更ファイルなし"
+    exit 0
+fi
+
+echo "チェック対象: $(echo "$FILES" | wc -l | tr -d ' ') ファイル"
+echo ""
+
+# -----------------------------------------------------------
+# Check 1: パスワード・シークレットのハードコード検出
+# -----------------------------------------------------------
+echo "--- Check 1: パスワード・シークレット ---"
+
+SECRET_PATTERNS=(
+    'password\s*[:=]\s*["\x27][^$]'       # password: "xxx" (${ENV}以外)
+    'secret\s*[:=]\s*["\x27][^$]'         # secret: "xxx"
+    'api_key\s*[:=]\s*["\x27]'            # api_key: "xxx"
+    'token\s*[:=]\s*["\x27]'              # token: "xxx"
+    'private_key\s*[:=]\s*["\x27]'        # private_key: "xxx"
+    'BEGIN (RSA |DSA |EC )?PRIVATE KEY'    # PEM秘密鍵
+    'AKIA[0-9A-Z]{16}'                    # AWS Access Key
+    'sk-[a-zA-Z0-9]{20,}'                 # OpenAI/Anthropic API Key
+)
+
+# テンプレートとテストは除外
+EXCLUDE_PATTERNS="templates/|tests/|test_|\.sample|\.example|\.md$"
+
+for file in $FILES; do
+    # 除外パターンに該当するファイルはスキップ
+    if echo "$file" | grep -qE "$EXCLUDE_PATTERNS"; then
+        continue
+    fi
+
+    # バイナリファイルはスキップ
+    if git show "$DIFF_TARGET:$file" 2>/dev/null | file - | grep -q "binary"; then
+        continue
+    fi
+
+    for pattern in "${SECRET_PATTERNS[@]}"; do
+        MATCHES=$(git show "$DIFF_TARGET:$file" 2>/dev/null | grep -inE "$pattern" || true)
+        if [ -n "$MATCHES" ]; then
+            echo -e "${RED}[BLOCK]${NC} $file に機密情報の可能性:"
+            echo "$MATCHES" | head -3 | sed 's/^/  > /'
+            ERRORS=$((ERRORS + 1))
+        fi
+    done
+done
+
+if [ $ERRORS -eq 0 ]; then
+    echo -e "${GREEN}[OK]${NC} 機密情報なし"
+fi
+echo ""
+
+# -----------------------------------------------------------
+# Check 2: プライベートIPアドレスのハードコード検出
+# -----------------------------------------------------------
+echo "--- Check 2: IPアドレス ---"
+
+IP_ERRORS=0
+for file in $FILES; do
+    if echo "$file" | grep -qE "$EXCLUDE_PATTERNS"; then
+        continue
+    fi
+
+    # RFC1918 アドレスの検出（10.x, 172.16-31.x, 192.168.x）
+    # ただしドキュメント用の例示（例: 10.0.0.1）は許可
+    MATCHES=$(git show "$DIFF_TARGET:$file" 2>/dev/null | grep -nE '\b(10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3})\b' || true)
+    if [ -n "$MATCHES" ]; then
+        echo -e "${YELLOW}[WARN]${NC} $file にプライベートIPアドレス:"
+        echo "$MATCHES" | head -3 | sed 's/^/  > /'
+        WARNINGS=$((WARNINGS + 1))
+        IP_ERRORS=$((IP_ERRORS + 1))
+    fi
+done
+
+if [ $IP_ERRORS -eq 0 ]; then
+    echo -e "${GREEN}[OK]${NC} プライベートIPなし"
+fi
+echo ""
+
+# -----------------------------------------------------------
+# Check 3: 大きなファイルの検出
+# -----------------------------------------------------------
+echo "--- Check 3: 大きなファイル ---"
+
+SIZE_ERRORS=0
+MAX_SIZE_KB=500
+for file in $FILES; do
+    SIZE=$(git show "$DIFF_TARGET:$file" 2>/dev/null | wc -c)
+    SIZE_KB=$((SIZE / 1024))
+    if [ "$SIZE_KB" -gt "$MAX_SIZE_KB" ]; then
+        echo -e "${YELLOW}[WARN]${NC} $file が ${SIZE_KB}KB（上限 ${MAX_SIZE_KB}KB）"
+        WARNINGS=$((WARNINGS + 1))
+        SIZE_ERRORS=$((SIZE_ERRORS + 1))
+    fi
+done
+
+if [ $SIZE_ERRORS -eq 0 ]; then
+    echo -e "${GREEN}[OK]${NC} 大きなファイルなし"
+fi
+echo ""
+
+# -----------------------------------------------------------
+# Check 4: inventory/credential ファイルの混入検出
+# -----------------------------------------------------------
+echo "--- Check 4: 機密ファイルの混入 ---"
+
+SENSITIVE_FILES=0
+SENSITIVE_PATTERNS_FILE=(
+    'inventory\.yaml$'
+    'inventory\.yml$'
+    '\.env$'
+    '\.env\.'
+    'credentials'
+    '\.clanet\.yaml$'
+    'context\.yaml$'
+    '\.pem$'
+    '\.key$'
+    'id_rsa'
+    'id_ed25519'
+)
+
+for file in $FILES; do
+    for pattern in "${SENSITIVE_PATTERNS_FILE[@]}"; do
+        if echo "$file" | grep -qE "$pattern"; then
+            # templates/ 内のサンプルは除外
+            if echo "$file" | grep -qE "^templates/"; then
+                continue
+            fi
+            echo -e "${RED}[BLOCK]${NC} 機密ファイルが含まれています: $file"
+            ERRORS=$((ERRORS + 1))
+            SENSITIVE_FILES=$((SENSITIVE_FILES + 1))
+        fi
+    done
+done
+
+if [ $SENSITIVE_FILES -eq 0 ]; then
+    echo -e "${GREEN}[OK]${NC} 機密ファイルなし"
+fi
+echo ""
+
+# -----------------------------------------------------------
+# 結果サマリー
+# -----------------------------------------------------------
+echo "============================================"
+if [ $ERRORS -gt 0 ]; then
+    echo -e "${RED}BLOCKED${NC}: $ERRORS 件のエラーが見つかりました"
+    echo "修正してから再度 git push してください"
+    echo ""
+    echo "誤検知の場合: git push --no-verify で回避できます"
+    echo "（本当に安全か確認してから使ってください）"
+    echo "============================================"
+    exit 1
+elif [ $WARNINGS -gt 0 ]; then
+    echo -e "${YELLOW}WARNING${NC}: $WARNINGS 件の警告があります"
+    echo "内容を確認して問題なければ push を続行します"
+    echo "============================================"
+    exit 0
+else
+    echo -e "${GREEN}PASSED${NC}: すべてのチェックをパスしました"
+    echo "============================================"
+    exit 0
+fi
