@@ -59,7 +59,7 @@ SECRET_PATTERNS=(
 )
 
 # テンプレートとテストは除外
-EXCLUDE_PATTERNS="templates/|tests/|test_|\.sample|\.example|\.md$"
+EXCLUDE_PATTERNS="templates/|tests/|test_|\.sample|\.example|\.md$|\.githooks/"
 
 for file in $FILES; do
     # 除外パターンに該当するファイルはスキップ
