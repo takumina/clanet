@@ -36,6 +36,7 @@ import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -88,6 +89,10 @@ DEFAULT_CONFIG: dict = {
     "read_timeout": 30,
     "read_timeout_long": 60,
     "connect_timeout": 5,
+    "connect_retries": 3,
+    "connect_retry_delay": 2,
+    "quiet": False,
+    "max_parallel": 4,
 }
 
 COMMIT_PLATFORMS = {"cisco_xr", "juniper_junos"}
@@ -392,7 +397,13 @@ def _redact_sensitive(text: str) -> str:
 
 
 def _warn_plaintext_passwords(inv: dict) -> None:
-    """Warn to stderr when devices use plaintext passwords instead of env vars."""
+    """Warn to stderr when devices use plaintext passwords instead of env vars.
+
+    Suppressed when quiet mode is enabled via .clanet.yaml or --quiet flag.
+    """
+    config = get_config()
+    if config.get("quiet"):
+        return
     for name, dev in inv.get("devices", {}).items():
         pw = dev.get("password", "")
         if isinstance(pw, str) and pw and not re.search(r'\$\{.+\}', pw):
@@ -468,7 +479,11 @@ def resolve_targets(inv: dict, target: str) -> list[tuple[str, dict]]:
 
 
 def connect(dev: dict):
-    """Create a Netmiko ConnectHandler from device config."""
+    """Create a Netmiko ConnectHandler from device config.
+
+    Retries on SSH banner errors and connection failures.
+    Retry count and delay are configurable via .clanet.yaml.
+    """
     try:
         from netmiko import ConnectHandler
     except ImportError:
@@ -484,14 +499,28 @@ def connect(dev: dict):
         )
 
     config = get_config()
-    return ConnectHandler(
-        device_type=dev["device_type"],
-        host=dev["host"],
-        username=dev["username"],
-        password=dev["password"],
-        port=dev.get("port", DEFAULT_SSH_PORT),
-        timeout=config["connect_timeout"],
-    )
+    retries = config.get("connect_retries", 3)
+    retry_delay = config.get("connect_retry_delay", 2)
+    last_error = None
+
+    for attempt in range(1, retries + 1):
+        try:
+            return ConnectHandler(
+                device_type=dev["device_type"],
+                host=dev["host"],
+                username=dev["username"],
+                password=dev["password"],
+                port=dev.get("port", DEFAULT_SSH_PORT),
+                timeout=config["connect_timeout"],
+            )
+        except Exception as e:
+            last_error = e
+            if attempt < retries:
+                time.sleep(retry_delay)
+            else:
+                raise DeviceConnectionError(
+                    f"failed to connect to {dev['host']} after {retries} attempts: {e}"
+                )
 
 
 def needs_commit(dev: dict) -> bool:
@@ -1097,6 +1126,223 @@ def cmd_health_commands(args):
         "commands": commands,
     }
     print(json.dumps(result, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: check (health check with summary/verdict/parallel)
+# ---------------------------------------------------------------------------
+
+
+def _check_single_device(name: str, dev: dict, hc: dict, config: dict,
+                          summary_mode: bool = False) -> dict:
+    """Run health check on a single device. Returns structured result.
+
+    Result dict keys:
+      - name: device name
+      - status: HEALTHY / WARNING / CRITICAL / UNREACHABLE
+      - interfaces: {up: int, down: int, admin_down: int}
+      - ospf_neighbors: int
+      - bgp_neighbors: {established: int, down: int}
+      - warnings: list of warning strings
+      - output: full output text (empty in summary mode)
+    """
+    result = {
+        "name": name,
+        "status": "HEALTHY",
+        "interfaces": {"up": 0, "down": 0, "admin_down": 0},
+        "ospf_neighbors": 0,
+        "bgp_neighbors": {"established": 0, "down": 0},
+        "warnings": [],
+        "output": "",
+    }
+
+    fallback = hc.get("fallback", {}).get("health_commands", ["show ip interface brief"])
+    commands = hc.get("health_commands", {}).get(dev["device_type"], fallback)
+
+    try:
+        conn = connect(dev)
+    except (ClanetError, Exception) as e:
+        result["status"] = "UNREACHABLE"
+        result["warnings"].append(f"connection failed: {e}")
+        return result
+
+    full_output = []
+    try:
+        for cmd in commands:
+            try:
+                output = conn.send_command(cmd, read_timeout=config["read_timeout"])
+
+                if not summary_mode:
+                    full_output.append(f"\n--- {cmd} ---\n")
+                    full_output.append(output)
+
+                # Parse interface status
+                if "interface brief" in cmd.lower():
+                    for line in output.splitlines():
+                        parts = line.split()
+                        if len(parts) >= 3 and parts[0] not in ("Interface", "-"):
+                            status_col = parts[2] if len(parts) > 2 else ""
+                            if status_col == "Up":
+                                result["interfaces"]["up"] += 1
+                            elif "Down" in status_col:
+                                if "Admin" in line or "admin" in line:
+                                    result["interfaces"]["admin_down"] += 1
+                                else:
+                                    result["interfaces"]["down"] += 1
+
+                # Parse OSPF neighbors
+                if "ospf" in cmd.lower() and "neighbor" in cmd.lower():
+                    for line in output.splitlines():
+                        if "FULL" in line:
+                            result["ospf_neighbors"] += 1
+
+                # Parse BGP summary
+                if "bgp" in cmd.lower() and "summary" in cmd.lower():
+                    for line in output.splitlines():
+                        parts = line.split()
+                        if len(parts) >= 10:
+                            try:
+                                # Last column: St/PfxRcd - number = established
+                                int(parts[-1])
+                                result["bgp_neighbors"]["established"] += 1
+                            except ValueError:
+                                if parts[-1] not in ("St/PfxRcd",):
+                                    result["bgp_neighbors"]["down"] += 1
+
+            except Exception as e:
+                result["warnings"].append(f"{cmd}: {e}")
+    finally:
+        conn.disconnect()
+
+    if not summary_mode:
+        result["output"] = "".join(full_output)
+
+    # Determine verdict
+    if result["interfaces"]["down"] > 0:
+        result["status"] = "WARNING"
+        result["warnings"].append(
+            f"{result['interfaces']['down']} interface(s) down"
+        )
+    if result["bgp_neighbors"]["down"] > 0:
+        result["status"] = "WARNING"
+        result["warnings"].append(
+            f"{result['bgp_neighbors']['down']} BGP neighbor(s) not established"
+        )
+    if result["interfaces"]["up"] == 0:
+        result["status"] = "CRITICAL"
+
+    return result
+
+
+def _print_check_summary(results: list[dict]) -> None:
+    """Print a compact summary table of health check results."""
+    # Count overall
+    healthy = sum(1 for r in results if r["status"] == "HEALTHY")
+    warning = sum(1 for r in results if r["status"] == "WARNING")
+    critical = sum(1 for r in results if r["status"] == "CRITICAL")
+    unreachable = sum(1 for r in results if r["status"] == "UNREACHABLE")
+
+    print(f"\n{'=' * DISPLAY_WIDTH}")
+    print(f" Health Check Summary ({len(results)} devices)")
+    print(f"{'=' * DISPLAY_WIDTH}")
+
+    for r in results:
+        intf_str = f"IF:{r['interfaces']['up']}up"
+        if r["interfaces"]["down"] > 0:
+            intf_str += f"/{r['interfaces']['down']}down"
+
+        ospf_str = f"OSPF:{r['ospf_neighbors']}"
+        bgp_est = r["bgp_neighbors"]["established"]
+        bgp_down = r["bgp_neighbors"]["down"]
+        bgp_str = f"BGP:{bgp_est}" if bgp_est > 0 else "BGP:n/a"
+        if bgp_down > 0:
+            bgp_str += f"/{bgp_down}down"
+
+        status_icon = {
+            "HEALTHY": "[OK]",
+            "WARNING": "[WARN]",
+            "CRITICAL": "[CRIT]",
+            "UNREACHABLE": "[DOWN]",
+        }.get(r["status"], "[??]")
+
+        print(f"  {status_icon} {r['name']:<20} {intf_str:<16} {ospf_str:<10} {bgp_str}")
+        for w in r["warnings"]:
+            print(f"       -> {w}")
+
+    # Overall verdict
+    print(f"\n{'─' * DISPLAY_WIDTH}")
+    if critical > 0 or unreachable > 0:
+        overall = "CRITICAL"
+    elif warning > 0:
+        overall = "WARNING"
+    else:
+        overall = "HEALTHY"
+    print(f"  Overall: {overall}"
+          f" (healthy:{healthy} warning:{warning}"
+          f" critical:{critical} unreachable:{unreachable})")
+    print(f"{'=' * DISPLAY_WIDTH}")
+
+
+def cmd_check(args):
+    """Health check with summary mode, auto-verdict, and parallel execution."""
+    inv = load_inventory()
+    config = get_config()
+    hc = _load_health_config()
+    target = _resolve_device_arg(args)
+    targets = resolve_targets(inv, target)
+    summary_mode = getattr(args, "summary", False)
+    max_workers = config.get("max_parallel", 4)
+
+    if len(targets) > 1 and max_workers > 1:
+        # Parallel execution
+        results = []
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(targets))) as pool:
+            futures = {
+                pool.submit(_check_single_device, name, dev, hc, config, summary_mode): name
+                for name, dev in targets
+            }
+            for future in as_completed(futures):
+                name = futures[future]
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    results.append({
+                        "name": name,
+                        "status": "UNREACHABLE",
+                        "interfaces": {"up": 0, "down": 0, "admin_down": 0},
+                        "ospf_neighbors": 0,
+                        "bgp_neighbors": {"established": 0, "down": 0},
+                        "warnings": [str(e)],
+                        "output": "",
+                    })
+        # Sort by original order
+        name_order = {name: i for i, (name, _) in enumerate(targets)}
+        results.sort(key=lambda r: name_order.get(r["name"], 999))
+    else:
+        # Sequential
+        results = []
+        for name, dev in targets:
+            results.append(
+                _check_single_device(name, dev, hc, config, summary_mode)
+            )
+
+    # Print results
+    if summary_mode:
+        _print_check_summary(results)
+    else:
+        for r in results:
+            print(f"\n{'=' * DISPLAY_WIDTH}")
+            print(f"Health Check: {r['name']} ({r['status']})")
+            print(f"{'=' * DISPLAY_WIDTH}")
+            if r["output"]:
+                print(r["output"])
+            for w in r["warnings"]:
+                print(f"[WARN] {w}")
+            print(f"\n[{r['status']}] {r['name']}: health check complete")
+
+        # Always print summary at the end for multi-device
+        if len(results) > 1:
+            _print_check_summary(results)
 
 
 # ---------------------------------------------------------------------------
@@ -1751,6 +1997,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Mode to query in (default: config)")
     p.set_defaults(func=cmd_syntax_help)
 
+    # check
+    p = sub.add_parser("check", help="Health check with auto-verdict")
+    p.add_argument("device", nargs="?", default=None, help="Device name")
+    p.add_argument("--all", dest="all_devices", action="store_true", help="All devices")
+    p.add_argument("--summary", action="store_true",
+                   help="Print compact summary only (no per-device output)")
+    p.add_argument("--quiet", "-q", action="store_true",
+                   help="Suppress security warnings")
+    p.set_defaults(func=cmd_check)
+
     # health-commands
     p = sub.add_parser("health-commands", help="List health check commands for a device")
     p.add_argument("device")
@@ -1825,6 +2081,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main():
     parser = build_parser()
     args = parser.parse_args()
+
+    # Apply --quiet flag to config if present
+    if getattr(args, "quiet", False):
+        config = get_config()
+        config["quiet"] = True
+
     try:
         args.func(args)
     except KeyboardInterrupt:

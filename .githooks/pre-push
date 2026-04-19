@@ -68,8 +68,10 @@ for file in $FILES; do
     fi
 
     # バイナリファイルはスキップ
-    if git show "$DIFF_TARGET:$file" 2>/dev/null | file - | grep -q "binary"; then
-        continue
+    if command -v file >/dev/null 2>&1; then
+        if git show "$DIFF_TARGET:$file" 2>/dev/null | file - 2>/dev/null | grep -q "binary"; then
+            continue
+        fi
     fi
 
     for pattern in "${SECRET_PATTERNS[@]}"; do
